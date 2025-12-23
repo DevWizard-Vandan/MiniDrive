@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package drive;
+
+option java_multiple_files = true;
+option java_package = "com.minidrive.grpc";
+
+// The Service Definition
+service DriveService {
+
+  // 1. Handshake: Client says "I want to upload 'resume.pdf' (10MB)"
+  // Server returns an upload_id to track this session.
+  rpc InitiateUpload (UploadRequest) returns (UploadResponse);
+
+  // 2. The "Twist" (Deduplication): Client sends a list of hashes for all chunks.
+  // Server checks its DB and replies: "I already have chunks 1, 3, and 5. Send me 2 and 4."
+  rpc CheckChunkExistence (ChunkCheckRequest) returns (ChunkCheckResponse);
+
+  // 3. The Heavy Lifting: Client streams the missing chunks.
+  // We use client-side streaming (many chunks -> one response).
+  rpc UploadChunk (stream ChunkData) returns (UploadStatus);
+
+  // 4. Finalize: Client says "I'm done." Server assembles the file version.
+  rpc CompleteUpload (CompleteRequest) returns (FileMetadata);
+}
+
+// --- Messages ---
+
+message UploadRequest {
+  string filename = 1;
+  string mime_type = 2;
+  int64 total_size_bytes = 3;
+}
+
+message UploadResponse {
+  string upload_id = 1; // UUID for resuming later
+}
+
+message ChunkCheckRequest {
+  string upload_id = 1;
+  repeated string chunk_hashes = 2; // SHA-256 hashes of every chunk
+}
+
+message ChunkCheckResponse {
+  repeated int32 missing_chunk_indices = 1; // "Only send me these indices"
+}
+
+message ChunkData {
+  string upload_id = 1;
+  int32 chunk_index = 2;
+  string chunk_hash = 3; // Verify integrity
+  bytes data = 4;        // The actual binary data (max 4MB usually)
+}
+
+message UploadStatus {
+  bool success = 1;
+  string message = 2;
+}
+
+message CompleteRequest {
+  string upload_id = 1;
+}
+
+message FileMetadata {
+  string file_id = 1;
+  int32 version = 2;
+  string url = 3;
+}

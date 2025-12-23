@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # --- THE BACKEND ---
+  drive-server:
+    build: .
+    container_name: drive_backend
+    ports:
+      - "50051:50051"
+    depends_on:
+      - postgres
+      - minio
+    environment:
+      # Use internal docker names (not localhost)
+      DB_URL: jdbc:postgresql://postgres:5432/minidrive
+      MINIO_ENDPOINT: http://minio:9000
+
+  # --- INFRASTRUCTURE (Same as before) ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: drive_db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: minidrive
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio
+    container_name: drive_storage
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+volumes:
+  postgres_data:
+  minio_data:
