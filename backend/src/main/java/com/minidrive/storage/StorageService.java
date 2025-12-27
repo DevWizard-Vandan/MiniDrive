@@ -1,10 +1,6 @@
 package com.minidrive.storage;
 
-import io.minio.BucketExistsArgs;
-import io.minio.MakeBucketArgs;
-import io.minio.MinioClient;
-import io.minio.PutObjectArgs;
-import io.minio.StatObjectArgs;
+import io.minio.*;
 import io.minio.errors.ErrorResponseException;
 import org.springframework.stereotype.Service;
 
@@ -83,6 +79,20 @@ public class StorageService {
 			throw new RuntimeException("Error checking chunk existence", e);
 		} catch (Exception e) {
 			throw new RuntimeException("Error checking chunk existence", e);
+		}
+	}
+
+	// Download a single chunk
+	public byte[] downloadChunk(String hash) {
+		try {
+			return minioClient.getObject(
+					GetObjectArgs.builder()
+							.bucket(BUCKET_NAME)
+							.object(hash)
+							.build()
+			).readAllBytes();
+		} catch (Exception e) {
+			throw new RuntimeException("Failed to fetch chunk: " + hash, e);
 		}
 	}
 }

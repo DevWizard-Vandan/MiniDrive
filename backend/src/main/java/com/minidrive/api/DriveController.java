@@ -1,42 +1,50 @@
 package com.minidrive.api;
 
 import com.minidrive.db.DatabaseService;
-import com.minidrive.service.DriveServiceImpl;
 import com.minidrive.storage.StorageService;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 
 @RestController
-@CrossOrigin(origins = "http://localhost:3000") // Allow React (running on port 3000)
+@CrossOrigin(origins = "http://localhost:3000")
 @RequestMapping("/api/drive")
 public class DriveController {
+
 	@Autowired
 	private StorageService storageService;
 
 	@Autowired
 	private DatabaseService databaseService;
-	private DriveServiceImpl driveService;
 
-	// Temporary storage for active uploads (just like in the gRPC service)
-	// Map<UploadId, List<ChunkHash>>
+	@Autowired
+	private RabbitTemplate rabbitTemplate;
+
+	// Temporary storage for active uploads (Session State)
 	private static final Map<String, List<String>> UPLOAD_CHUNKS_MAP = new ConcurrentHashMap<>();
-	// Map<UploadId, FileMetadata>
 	private static final Map<String, FileInfo> UPLOAD_METADATA_MAP = new ConcurrentHashMap<>();
 
-//	public DriveController() {
-//		// In a real Spring app, these would be @Autowired
-//		this.storageService = new StorageService();
-//		this.databaseService = new DatabaseService();
-//	}
+	// --- 0. GET USER FILES (New for Dashboard) ---
+	@GetMapping("/files")
+	public ResponseEntity<List<Map<String, Object>>> getUserFiles(Authentication authentication) {
+		if (authentication == null) return ResponseEntity.status(401).build();
+
+		String username = authentication.getName();
+		List<Map<String, Object>> files = databaseService.getFilesByUser(username);
+
+		return ResponseEntity.ok(files);
+	}
 
 	// --- 1. Initiate Upload ---
 	@PostMapping("/init")
@@ -59,22 +67,17 @@ public class DriveController {
 											  @RequestParam("hash") String hash,
 											  @RequestParam("chunk") MultipartFile chunkData) {
 		try {
-			// Track the order of hashes for final reconstruction
 			List<String> chunkList = UPLOAD_CHUNKS_MAP.get(uploadId);
 			if (chunkList == null) return ResponseEntity.status(404).body("Session not found");
 
-			// synchronized to ensure order if multiple chunks arrive at once
 			synchronized (chunkList) {
-				// Ensure list is big enough (fill gaps if chunks arrive out of order)
 				while (chunkList.size() <= index) chunkList.add(null);
 				chunkList.set(index, hash);
 			}
 
-			// DEDUPLICATION: Check if we already have this chunk physically
+			// DEDUPLICATION: Check physical storage
 			if (!storageService.doesChunkExist(hash)) {
 				storageService.uploadChunk(hash, chunkData.getBytes());
-				// Also update DB global cache
-				// databaseService.addChunkToGlobalCache(hash); // Optional optimization
 				System.out.println("REST: Uploaded chunk #" + index);
 			} else {
 				System.out.println("REST: Deduped chunk #" + index);
@@ -87,6 +90,42 @@ public class DriveController {
 		}
 	}
 
+	@GetMapping("/download/{filename}")
+	public ResponseEntity<StreamingResponseBody> downloadFile(
+			@PathVariable String filename,
+			Authentication authentication) {
+
+		if (authentication == null) return ResponseEntity.status(401).build();
+		String username = authentication.getName();
+
+		// 1. Find the File ID
+		Map<String, Object> metadata = databaseService.getFileMetadata(filename, username);
+		if (metadata == null) return ResponseEntity.notFound().build();
+
+		String fileId = (String) metadata.get("id");
+		Long fileSize = (Long) metadata.get("size");
+
+		// 2. Get the list of chunks
+		List<String> chunks = databaseService.getFileChunks(fileId);
+
+		// 3. Create a Stream that pulls chunks one by one
+		StreamingResponseBody stream = outputStream -> {
+			for (String hash : chunks) {
+				byte[] data = storageService.downloadChunk(hash);
+				outputStream.write(data); // Send to user immediately
+				outputStream.flush();
+			}
+		};
+
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+				.contentLength(fileSize)
+				.contentType(MediaType.APPLICATION_OCTET_STREAM)
+				.body(stream);
+	}
+
+
+
 	// --- 3. Finalize ---
 	@PostMapping("/complete")
 	public ResponseEntity<String> completeUpload(@RequestParam("uploadId") String uploadId) {
@@ -95,23 +134,39 @@ public class DriveController {
 
 		if (info == null || hashes == null) return ResponseEntity.status(404).body("Session missing");
 
-		// Save to PostgreSQL
-		String newFileId = UUID.randomUUID().toString();
-		databaseService.saveFileMetadata(newFileId, info.name, info.size);
+		// A. Get Current User (from JWT)
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		String username = (auth != null) ? auth.getName() : "anonymous";
 
+		// B. Save Metadata with OWNER
+		String newFileId = UUID.randomUUID().toString();
+		// Updated to pass 4 arguments: ID, Name, Size, Username
+		databaseService.saveFileMetadata(newFileId, info.name, info.size, username);
+
+		// C. Link Chunks
 		for (int i = 0; i < hashes.size(); i++) {
 			if (hashes.get(i) == null) return ResponseEntity.status(400).body("Missing chunk #" + i);
 			databaseService.addChunkToFile(newFileId, hashes.get(i), i);
+		}
+
+		// D. Trigger Background Worker (RabbitMQ)
+		if (rabbitTemplate != null) {
+			String message = "FILE_ID:" + newFileId + "|NAME:" + info.name;
+			try {
+				rabbitTemplate.convertAndSend("file-processing-queue", message);
+				System.out.println("⚡ REST: Published event to RabbitMQ: " + message);
+			} catch (Exception e) {
+				System.err.println("⚠️ Warning: RabbitMQ down");
+			}
 		}
 
 		// Cleanup
 		UPLOAD_METADATA_MAP.remove(uploadId);
 		UPLOAD_CHUNKS_MAP.remove(uploadId);
 
-		System.out.println("REST: Finalized file " + info.name);
+		System.out.println("REST: Finalized file " + info.name + " for user " + username);
 		return ResponseEntity.ok(newFileId);
 	}
 
-	// Helper Record
 	record FileInfo(String name, long size) {}
 }

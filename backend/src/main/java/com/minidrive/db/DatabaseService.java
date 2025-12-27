@@ -2,13 +2,11 @@ package com.minidrive.db;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.stereotype.Service;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.UUID;
-import org.springframework.stereotype.Service; // <--- Import this
+import javax.sql.DataSource;
+import java.sql.*;
+import java.util.*;
 
 @Service
 public class DatabaseService {
@@ -18,55 +16,131 @@ public class DatabaseService {
 	public DatabaseService() {
 		// Configure Connection Pool (HikariCP)
 		HikariConfig config = new HikariConfig();
-		config.setJdbcUrl("jdbc:postgresql://localhost:5432/minidrive");
+
+		// 1. DYNAMIC CONFIG: Check if we are in Docker, else use Localhost
+		String envDbUrl = System.getenv("DB_URL");
+		if (envDbUrl != null && !envDbUrl.isEmpty()) {
+			config.setJdbcUrl(envDbUrl);
+		} else {
+			config.setJdbcUrl("jdbc:postgresql://localhost:5432/minidrive");
+		}
+
 		config.setUsername("admin");
 		config.setPassword("password123");
-		config.setMaximumPoolSize(10); // Handle up to 10 concurrent DB connections
+		config.setMaximumPoolSize(10);
 
 		this.dataSource = new HikariDataSource(config);
 
-		initSchema();
+		// 2. Initialize the Single Source of Truth Schema
+		initDB();
 	}
 
-	private void initSchema() {
-		try (Connection conn = dataSource.getConnection()) {
-			// 1. Files Table
-			conn.createStatement().execute("""
-                CREATE TABLE IF NOT EXISTS files (
-                    file_id UUID PRIMARY KEY,
-                    file_name VARCHAR(255),
-                    size_bytes BIGINT,
+	// Required for AuthService
+	public DataSource getDataSource() {
+		return this.dataSource;
+	}
+
+	public void initDB() {
+		try (Connection conn = dataSource.getConnection();
+			 Statement stmt = conn.createStatement()) {
+
+			// 1. Users Table
+			stmt.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id UUID PRIMARY KEY,
+                    username VARCHAR(50) UNIQUE NOT NULL,
+                    password VARCHAR(255) NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """);
 
-			// 2. Chunks Table (Maps a File to its Chunks)
-			conn.createStatement().execute("""
+			// 2. Files Table
+			stmt.execute("""
+                CREATE TABLE IF NOT EXISTS files (
+                    file_id UUID PRIMARY KEY,
+                    filename VARCHAR(255),
+                    size BIGINT,
+                    owner_id UUID REFERENCES users(id),
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """);
+
+			// 3. File-Chunk Mapping
+			stmt.execute("""
                 CREATE TABLE IF NOT EXISTS file_chunks (
-                    file_id UUID,
+                    file_id UUID REFERENCES files(file_id),
                     chunk_hash VARCHAR(64),
                     chunk_index INT,
                     PRIMARY KEY (file_id, chunk_index)
                 )
             """);
+
+			// 4. Global Chunk Index (For Deduplication)
+			stmt.execute("""
+                CREATE TABLE IF NOT EXISTS global_chunks (
+                    chunk_hash VARCHAR(64) PRIMARY KEY,
+                    ref_count INT DEFAULT 1
+                )
+            """);
+
+			System.out.println("DB: Schema initialized successfully (Users + Files + Chunks)");
+
 		} catch (SQLException e) {
-			throw new RuntimeException("DB Init Failed", e);
+			e.printStackTrace();
 		}
 	}
 
 	// Save metadata for a finished file
-	public void saveFileMetadata(String fileId, String fileName, long size) {
+	// NOTE: For Phase 1 (Transition), ownerId can be null if you haven't updated DriveServiceImpl yet
+	public void saveFileMetadata(String fileId, String fileName, long size, String username) {
 		try (Connection conn = dataSource.getConnection()) {
-			PreparedStatement ps = conn.prepareStatement(
-					"INSERT INTO files (file_id, file_name, size_bytes) VALUES (?, ?, ?)"
-			);
-			ps.setObject(1, UUID.fromString(fileId));
-			ps.setString(2, fileName);
-			ps.setLong(3, size);
-			ps.executeUpdate();
+			// 1. Get User ID from Username
+			PreparedStatement userPs = conn.prepareStatement("SELECT id FROM users WHERE username = ?");
+			userPs.setString(1, username);
+			ResultSet rs = userPs.executeQuery();
+
+			if (rs.next()) {
+				UUID userId = (UUID) rs.getObject("id");
+
+				// 2. Insert File with Owner ID
+				PreparedStatement ps = conn.prepareStatement(
+						"INSERT INTO files (file_id, filename, size, owner_id) VALUES (?, ?, ?, ?)"
+				);
+				ps.setObject(1, UUID.fromString(fileId));
+				ps.setString(2, fileName);
+				ps.setLong(3, size);
+				ps.setObject(4, userId);
+				ps.executeUpdate();
+			}
 		} catch (SQLException e) {
 			e.printStackTrace();
 		}
+	}
+
+	// --- NEW: Get all files for a user ---
+	public List<Map<String, Object>> getFilesByUser(String username) {
+		List<Map<String, Object>> files = new ArrayList<>();
+		try (Connection conn = dataSource.getConnection()) {
+			PreparedStatement ps = conn.prepareStatement(
+					"SELECT filename, size, uploaded_at FROM files f " +
+							"JOIN users u ON f.owner_id = u.id " +
+							"WHERE u.username = ? " +
+							"ORDER BY f.uploaded_at DESC"
+			);
+			ps.setString(1, username);
+			ResultSet rs = ps.executeQuery();
+
+			while (rs.next()) {
+				Map<String, Object> file = new HashMap<>();
+				file.put("name", rs.getString("filename"));
+				file.put("size", rs.getLong("size"));
+				file.put("date", rs.getTimestamp("uploaded_at").toString());
+				files.add(file);
+			}
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return files;
 	}
 
 	// Check if we have this chunk globally (Deduplication Check)
@@ -81,6 +155,44 @@ public class DatabaseService {
 		} catch (SQLException e) {
 			return false;
 		}
+	}
+
+	public List<String> getFileChunks(String fileId) {
+		List<String> chunks = new ArrayList<>();
+		try (Connection conn = dataSource.getConnection()) {
+			PreparedStatement ps = conn.prepareStatement(
+					"SELECT chunk_hash FROM file_chunks WHERE file_id = ? ORDER BY chunk_index ASC"
+			);
+			ps.setObject(1, UUID.fromString(fileId));
+			ResultSet rs = ps.executeQuery();
+			while (rs.next()) {
+				chunks.add(rs.getString("chunk_hash"));
+			}
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return chunks;
+	}
+
+	// Get file ID by filename and user (for download lookup)
+	public Map<String, Object> getFileMetadata(String filename, String username) {
+		try (Connection conn = dataSource.getConnection()) {
+			PreparedStatement ps = conn.prepareStatement(
+					"SELECT f.file_id, f.size FROM files f JOIN users u ON f.owner_id = u.id WHERE f.filename = ? AND u.username = ?"
+			);
+			ps.setString(1, filename);
+			ps.setString(2, username);
+			ResultSet rs = ps.executeQuery();
+			if (rs.next()) {
+				return Map.of(
+						"id", rs.getObject("file_id").toString(),
+						"size", rs.getLong("size")
+				);
+			}
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return null;
 	}
 
 	// Link a chunk to a file

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @Service // 1. Tells Spring to manage this class so we can use RabbitMQ
 public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
@@ -121,11 +122,14 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 			return;
 		}
 
+		// --- NEW: Get the currently logged-in user ---
+		String username = SecurityContextHolder.getContext().getAuthentication().getName();
+		// ---------------------------------------------
+
 		String newFileId = UUID.randomUUID().toString();
 
-		// 1. Save File Info to Postgres
-		databaseService.saveFileMetadata(newFileId, originalInfo.getFilename(), originalInfo.getTotalSizeBytes());
-
+		// --- UPDATE: Pass username to save method ---
+		databaseService.saveFileMetadata(newFileId, originalInfo.getFilename(), originalInfo.getTotalSizeBytes(), username);
 		// 2. Link File -> Chunks in Postgres
 		for (int i = 0; i < orderedHashes.size(); i++) {
 			databaseService.addChunkToFile(newFileId, orderedHashes.get(i), i);
