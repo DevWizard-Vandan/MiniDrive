@@ -4,14 +4,25 @@ import com.minidrive.grpc.*;
 import com.minidrive.storage.StorageService;
 import com.minidrive.db.DatabaseService;
 import io.grpc.stub.StreamObserver;
-import com.minidrive.grpc.FileMetadata;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+@Service // 1. Tells Spring to manage this class so we can use RabbitMQ
 public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 
-	private final StorageService storageService;
-	private final DatabaseService databaseService;
+	@Autowired
+	private StorageService storageService;
+
+	@Autowired
+	private DatabaseService databaseService;
+
+	// 2. Inject RabbitMQ Template (Used to send messages)
+	@Autowired
+	private RabbitTemplate rabbitTemplate;
 
 	// Temporary session state (while uploading, before finalizing)
 	// Key: UploadID -> Value: Metadata (Name, Size, etc.)
@@ -21,8 +32,8 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 	private static final Map<String, List<String>> UPLOAD_CHUNKS_MAP = new ConcurrentHashMap<>();
 
 	public DriveServiceImpl() {
-		this.storageService = new StorageService();
-		this.databaseService = new DatabaseService();
+//		this.storageService = new StorageService();
+//		this.databaseService = new DatabaseService();
 	}
 
 	@Override
@@ -52,12 +63,7 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 			String hash = incomingHashes.get(i);
 
 			// HYBRID CHECK: Check DB (Metadata) AND MinIO (Physical Storage)
-			// It's possible DB says yes but file was deleted from disk manually.
 			boolean dbHasIt = databaseService.hasChunk(hash);
-			boolean storageHasIt = false;
-
-			// Optimization: Only check MinIO if DB says we don't have it (or periodically)
-			// For safety, we trust the DB for now to be fast.
 
 			if (!dbHasIt) {
 				// We definitely need this chunk.
@@ -83,7 +89,6 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 				byte[] data = chunk.getData().toByteArray();
 
 				// 1. Upload to MinIO (The Physical Layer)
-				// We check storageService again to be safe against race conditions
 				if (!storageService.doesChunkExist(hash)) {
 					storageService.uploadChunk(hash, data);
 					System.out.println("Uploaded Chunk #" + chunk.getChunkIndex());
@@ -126,7 +131,22 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 			databaseService.addChunkToFile(newFileId, orderedHashes.get(i), i);
 		}
 
-		// 3. Cleanup Memory
+		// --- 3. NEW: FIRE EVENT TO RABBITMQ ---
+		// We notify the worker queue that a file is ready for processing (Virus Scan/Thumbnail)
+		if (rabbitTemplate != null) {
+			String message = "FILE_ID:" + newFileId + "|NAME:" + originalInfo.getFilename();
+			try {
+				rabbitTemplate.convertAndSend("file-processing-queue", message);
+				System.out.println("⚡ EVENT: Published upload event to RabbitMQ: " + message);
+			} catch (Exception e) {
+				System.err.println("⚠️ Warning: RabbitMQ is down, but file was saved. Error: " + e.getMessage());
+			}
+		} else {
+			System.err.println("⚠️ Warning: RabbitTemplate is null. Did you use @Autowired in DriveController?");
+		}
+		// --------------------------------------
+
+		// 4. Cleanup Memory
 		CURRENT_UPLOADS.remove(uploadId);
 		UPLOAD_CHUNKS_MAP.remove(uploadId);
 
@@ -135,7 +155,7 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 		FileMetadata metadata = FileMetadata.newBuilder()
 				.setFileId(newFileId)
 				.setVersion(1)
-				.setUrl("http://localhost:9000/drive-chunks/" + orderedHashes.get(0)) // Link to first chunk for demo
+				.setUrl("http://localhost:9000/drive-chunks/" + orderedHashes.get(0))
 				.build();
 
 		responseObserver.onNext(metadata);

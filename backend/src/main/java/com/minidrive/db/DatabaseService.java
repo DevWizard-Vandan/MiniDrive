@@ -8,7 +8,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.UUID;
+import org.springframework.stereotype.Service; // <--- Import this
 
+@Service
 public class DatabaseService {
 
 	private final HikariDataSource dataSource;

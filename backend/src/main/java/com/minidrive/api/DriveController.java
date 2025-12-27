@@ -1,7 +1,9 @@
 package com.minidrive.api;
 
 import com.minidrive.db.DatabaseService;
+import com.minidrive.service.DriveServiceImpl;
 import com.minidrive.storage.StorageService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -17,9 +19,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @CrossOrigin(origins = "http://localhost:3000") // Allow React (running on port 3000)
 @RequestMapping("/api/drive")
 public class DriveController {
+	@Autowired
+	private StorageService storageService;
 
-	private final StorageService storageService;
-	private final DatabaseService databaseService;
+	@Autowired
+	private DatabaseService databaseService;
+	private DriveServiceImpl driveService;
 
 	// Temporary storage for active uploads (just like in the gRPC service)
 	// Map<UploadId, List<ChunkHash>>
@@ -27,11 +32,11 @@ public class DriveController {
 	// Map<UploadId, FileMetadata>
 	private static final Map<String, FileInfo> UPLOAD_METADATA_MAP = new ConcurrentHashMap<>();
 
-	public DriveController() {
-		// In a real Spring app, these would be @Autowired
-		this.storageService = new StorageService();
-		this.databaseService = new DatabaseService();
-	}
+//	public DriveController() {
+//		// In a real Spring app, these would be @Autowired
+//		this.storageService = new StorageService();
+//		this.databaseService = new DatabaseService();
+//	}
 
 	// --- 1. Initiate Upload ---
 	@PostMapping("/init")

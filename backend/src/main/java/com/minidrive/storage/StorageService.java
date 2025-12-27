@@ -6,10 +6,11 @@ import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.StatObjectArgs;
 import io.minio.errors.ErrorResponseException;
+import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-
+@Service // <--- ADD THIS ANNOTATION
 public class StorageService {
 
 	private final MinioClient minioClient;

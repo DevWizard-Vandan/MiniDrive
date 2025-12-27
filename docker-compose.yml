@@ -3,19 +3,21 @@ version: '3.8'
 services:
   # --- THE BACKEND ---
   drive-server:
-    build: .
+    build: ./backend
     container_name: drive_backend
     ports:
       - "50051:50051"
+      - "8080:8080"      # REST Port (Important for the frontend!)
     depends_on:
       - postgres
       - minio
+      - rabbitmq         # Added RabbitMQ dependency
     environment:
-      # Use internal docker names (not localhost)
-      DB_URL: jdbc:postgresql://postgres:5432/minidrive
-      MINIO_ENDPOINT: http://minio:9000
+      DB_URL: jdbc:postgresql://drive_db:5432/minidrive
+      MINIO_ENDPOINT: http://drive_storage:9000
+      RABBITMQ_HOST: drive_queue
 
-  # --- INFRASTRUCTURE (Same as before) ---
+  # --- INFRASTRUCTURE ---
   postgres:
     image: postgres:15-alpine
     container_name: drive_db
@@ -40,6 +42,16 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: drive_queue
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: password123
 
 volumes:
   postgres_data:
