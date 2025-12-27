@@ -195,6 +195,32 @@ public class DatabaseService {
 		return null;
 	}
 
+	// Delete a file (Metadata removal only)
+	public boolean deleteFile(String filename, String username) {
+		try (Connection conn = dataSource.getConnection()) {
+			// 1. Get ID
+			Map<String, Object> meta = getFileMetadata(filename, username);
+			if (meta == null) return false;
+			String fileId = (String) meta.get("id");
+
+			// 2. Delete Mappings first (Foreign Key constraint)
+			try (PreparedStatement ps = conn.prepareStatement("DELETE FROM file_chunks WHERE file_id = ?")) {
+				ps.setObject(1, UUID.fromString(fileId));
+				ps.executeUpdate();
+			}
+
+			// 3. Delete File Metadata
+			try (PreparedStatement ps = conn.prepareStatement("DELETE FROM files WHERE file_id = ?")) {
+				ps.setObject(1, UUID.fromString(fileId));
+				ps.executeUpdate();
+			}
+			return true;
+		} catch (SQLException e) {
+			e.printStackTrace();
+			return false;
+		}
+	}
+
 	// Link a chunk to a file
 	public void addChunkToFile(String fileId, String chunkHash, int index) {
 		try (Connection conn = dataSource.getConnection()) {

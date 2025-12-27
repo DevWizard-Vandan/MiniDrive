@@ -90,6 +90,13 @@ public class DriveController {
 		}
 	}
 
+	@DeleteMapping("/{filename}")
+	public ResponseEntity<?> deleteFile(@PathVariable String filename, Authentication authentication) {
+		if (authentication == null) return ResponseEntity.status(401).build();
+		boolean deleted = databaseService.deleteFile(filename, authentication.getName());
+		return deleted ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
+	}
+
 	@GetMapping("/download/{filename}")
 	public ResponseEntity<StreamingResponseBody> downloadFile(
 			@PathVariable String filename,
