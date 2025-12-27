@@ -195,6 +195,19 @@ public class DriveController {
 		return ResponseEntity.ok().build();
 	}
 
+	// Move Item
+	@PostMapping("/action/move")
+	public ResponseEntity<?> moveItem(@RequestBody Map<String, Object> body, Authentication auth) {
+		if (auth == null) return ResponseEntity.status(401).build();
+
+		String id = (String) body.get("id");
+		String type = (String) body.get("type"); // 'file' or 'folder'
+		String targetId = (String) body.get("targetId"); // ID or null (for root)
+
+		databaseService.moveEntity(id, "folder".equals(type), targetId, auth.getName());
+		return ResponseEntity.ok().build();
+	}
+
 	// --- 8. DOWNLOAD FILE ---
 	@GetMapping("/download/{filename}")
 	public ResponseEntity<StreamingResponseBody> downloadFile(
