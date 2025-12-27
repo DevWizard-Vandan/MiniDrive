@@ -1,61 +1,70 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
-import { Lock, User, UserPlus } from 'lucide-react';
+import api from './api'; // Use our new robust API
+import AuthLayout from './AuthLayout';
+import toast from 'react-hot-toast';
+import { Loader2 } from 'lucide-react';
 
 const Register = () => {
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [form, setForm] = useState({ username: '', password: '' });
     const navigate = useNavigate();
 
-    const handleRegister = async (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
+        setLoading(true);
         try {
-            await axios.post('http://localhost:8080/api/auth/register', { username, password });
-            navigate('/login');
+            // Correct API call for registration
+            const res = await api.post('/auth/register', form);
+
+            // Auto-login after registration
+            localStorage.setItem('token', res.data.token);
+            localStorage.setItem('user', form.username);
+
+            toast.success("Account created successfully! 🚀");
+            navigate('/');
         } catch (err) {
-            alert('Registration failed. Username might be taken.');
+            // Error handled by api.js interceptor
+        } finally {
+            setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50">
-            <div className="bg-white p-8 rounded-2xl shadow-xl w-96 border border-slate-100">
-                <div className="text-center mb-8">
-                    <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-lg mx-auto mb-4">
-                        <UserPlus size={24} />
-                    </div>
-                    <h2 className="text-2xl font-bold text-slate-800">Create Account</h2>
-                    <p className="text-slate-400 text-sm">Join MiniDrive today</p>
+        <AuthLayout title="Create Account" subtitle="Join MiniDrive to store and share files.">
+            <form onSubmit={handleSubmit} className="space-y-5">
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                    <input
+                        className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
+                        value={form.username}
+                        onChange={e => setForm({...form, username: e.target.value})}
+                        required
+                        placeholder="Choose a username"
+                    />
                 </div>
-
-                <form onSubmit={handleRegister} className="space-y-4">
-                    <div className="relative">
-                        <User className="w-5 h-5 absolute left-3 top-3 text-slate-400" />
-                        <input
-                            type="text" placeholder="Username" required
-                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                            value={username} onChange={e => setUsername(e.target.value)}
-                        />
-                    </div>
-                    <div className="relative">
-                        <Lock className="w-5 h-5 absolute left-3 top-3 text-slate-400" />
-                        <input
-                            type="password" placeholder="Password" required
-                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                            value={password} onChange={e => setPassword(e.target.value)}
-                        />
-                    </div>
-                    <button type="submit" className="w-full bg-emerald-500 text-white py-3 rounded-xl font-semibold shadow-lg hover:bg-emerald-600 transition-all active:scale-95">
-                        Sign Up
-                    </button>
-                </form>
-
-                <p className="mt-6 text-center text-slate-500 text-sm">
-                    Already have an account? <Link to="/login" className="text-emerald-600 font-semibold hover:underline">Log in</Link>
-                </p>
-            </div>
-        </div>
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                    <input
+                        type="password"
+                        className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
+                        value={form.password}
+                        onChange={e => setForm({...form, password: e.target.value})}
+                        required
+                        placeholder="Choose a password"
+                    />
+                </div>
+                <button
+                    disabled={loading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-all active:scale-[0.98] flex items-center justify-center"
+                >
+                    {loading ? <Loader2 className="animate-spin" /> : "Sign Up"}
+                </button>
+            </form>
+            <p className="mt-8 text-center text-slate-500">
+                Already have an account? <Link to="/login" className="text-indigo-600 font-semibold hover:underline">Log in</Link>
+            </p>
+        </AuthLayout>
     );
 };
 

@@ -1,64 +1,64 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
-import { Lock, User } from 'lucide-react';
+import api from './api'; // Use our new robust API
+import AuthLayout from './AuthLayout';
+import toast from 'react-hot-toast';
+import { Loader2 } from 'lucide-react';
 
 const Login = () => {
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [form, setForm] = useState({ username: '', password: '' });
     const navigate = useNavigate();
 
-    const handleLogin = async (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
+        setLoading(true);
         try {
-            const res = await axios.post('http://localhost:8080/api/auth/login', { username, password });
-            localStorage.setItem('token', res.data.token); // Save JWT
-            localStorage.setItem('user', username);
-            navigate('/'); // Go to Dashboard
+            const res = await api.post('/auth/login', form);
+            localStorage.setItem('token', res.data.token);
+            localStorage.setItem('user', form.username);
+            toast.success("Welcome back!");
+            navigate('/');
         } catch (err) {
-            setError('Invalid credentials');
+            // Error handled by interceptor, but we stop loading
+        } finally {
+            setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50">
-            <div className="bg-white p-8 rounded-2xl shadow-xl w-96 border border-slate-100">
-                <div className="text-center mb-8">
-                    <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-lg mx-auto mb-4">M</div>
-                    <h2 className="text-2xl font-bold text-slate-800">Welcome Back</h2>
-                    <p className="text-slate-400 text-sm">Sign in to MiniDrive</p>
+        <AuthLayout title="Welcome Back" subtitle="Please enter your details to sign in.">
+            <form onSubmit={handleSubmit} className="space-y-5">
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                    <input
+                        className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
+                        value={form.username}
+                        onChange={e => setForm({...form, username: e.target.value})}
+                        required
+                    />
                 </div>
-
-                {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 text-center">{error}</div>}
-
-                <form onSubmit={handleLogin} className="space-y-4">
-                    <div className="relative">
-                        <User className="w-5 h-5 absolute left-3 top-3 text-slate-400" />
-                        <input
-                            type="text" placeholder="Username" required
-                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                            value={username} onChange={e => setUsername(e.target.value)}
-                        />
-                    </div>
-                    <div className="relative">
-                        <Lock className="w-5 h-5 absolute left-3 top-3 text-slate-400" />
-                        <input
-                            type="password" placeholder="Password" required
-                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                            value={password} onChange={e => setPassword(e.target.value)}
-                        />
-                    </div>
-                    <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold shadow-lg hover:bg-indigo-700 transition-all active:scale-95">
-                        Sign In
-                    </button>
-                </form>
-
-                <p className="mt-6 text-center text-slate-500 text-sm">
-                    New here? <Link to="/register" className="text-indigo-600 font-semibold hover:underline">Create an account</Link>
-                </p>
-            </div>
-        </div>
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                    <input
+                        type="password"
+                        className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
+                        value={form.password}
+                        onChange={e => setForm({...form, password: e.target.value})}
+                        required
+                    />
+                </div>
+                <button
+                    disabled={loading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-all active:scale-[0.98] flex items-center justify-center"
+                >
+                    {loading ? <Loader2 className="animate-spin" /> : "Sign In"}
+                </button>
+            </form>
+            <p className="mt-8 text-center text-slate-500">
+                Don't have an account? <Link to="/register" className="text-indigo-600 font-semibold hover:underline">Sign up</Link>
+            </p>
+        </AuthLayout>
     );
 };
 

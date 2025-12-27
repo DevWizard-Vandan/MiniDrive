@@ -394,6 +394,37 @@ public class DatabaseService {
 		}
 	}
 
+	// --- MOVE LOGIC ---
+	public void moveEntity(String id, boolean isFolder, String targetFolderId, String username) {
+		try (Connection conn = dataSource.getConnection()) {
+			String userId = getUserId(conn, username);
+			if (userId == null) return;
+
+			// Determine table and columns
+			String table = isFolder ? "folders" : "files";
+			String idCol = isFolder ? "id" : "file_id";
+			String parentCol = isFolder ? "parent_id" : "folder_id";
+
+			// Validate Target Folder (unless moving to root)
+			Object targetUuid = null;
+			if (targetFolderId != null && !targetFolderId.equals("root")) {
+				targetUuid = UUID.fromString(targetFolderId);
+				// Optional: Check if target folder exists and belongs to user here
+			}
+
+			PreparedStatement ps = conn.prepareStatement(
+					"UPDATE " + table + " SET " + parentCol + " = ? WHERE " + idCol + " = ? AND owner_id = ?::uuid"
+			);
+			ps.setObject(1, targetUuid);
+			ps.setObject(2, UUID.fromString(id));
+			ps.setString(3, userId);
+			ps.executeUpdate();
+
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+	}
+
 	public Map<String, Object> getFileMetadata(String filename, String username) {
 		try (Connection conn = dataSource.getConnection()) {
 			PreparedStatement ps = conn.prepareStatement(
