@@ -7,12 +7,12 @@ import io.grpc.stub.StreamObserver;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.security.core.context.SecurityContextHolder;
 
-@Service // 1. Tells Spring to manage this class so we can use RabbitMQ
+@Service
 public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 
 	@Autowired
@@ -21,56 +21,67 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 	@Autowired
 	private DatabaseService databaseService;
 
-	// 2. Inject RabbitMQ Template (Used to send messages)
 	@Autowired
 	private RabbitTemplate rabbitTemplate;
 
-	// Temporary session state (while uploading, before finalizing)
-	// Key: UploadID -> Value: Metadata (Name, Size, etc.)
+	// Maps
+	private static final Map<String, String> UPLOAD_FOLDER_MAP = new ConcurrentHashMap<>();
 	private static final Map<String, UploadRequest> CURRENT_UPLOADS = new ConcurrentHashMap<>();
-
-	// Key: UploadID -> List of Ordered Hashes (to reconstruction later)
 	private static final Map<String, List<String>> UPLOAD_CHUNKS_MAP = new ConcurrentHashMap<>();
 
 	public DriveServiceImpl() {
-//		this.storageService = new StorageService();
-//		this.databaseService = new DatabaseService();
+		// Empty constructor (Spring handles injection)
 	}
 
+	// --- 1. Manual Init for REST Controller ---
+	public void manualInit(String uploadId, String filename, long size, String folderId) {
+		UploadRequest request = UploadRequest.newBuilder().setFilename(filename).setTotalSizeBytes(size).build();
+		CURRENT_UPLOADS.put(uploadId, request);
+		UPLOAD_CHUNKS_MAP.put(uploadId, new ArrayList<>());
+		if (folderId != null) {
+			UPLOAD_FOLDER_MAP.put(uploadId, folderId);
+		}
+		System.out.println("Init Upload: " + filename + " [" + uploadId + "] Folder: " + folderId);
+	}
+
+	// --- 2. Standard gRPC Init ---
 	@Override
 	public void initiateUpload(UploadRequest request, StreamObserver<UploadResponse> responseObserver) {
 		String uploadId = UUID.randomUUID().toString();
 
-		// Save session info
 		CURRENT_UPLOADS.put(uploadId, request);
 		UPLOAD_CHUNKS_MAP.put(uploadId, new ArrayList<>());
 
-		System.out.println("Start Upload: " + request.getFilename() + " [" + uploadId + "]");
+		System.out.println("Start Upload (gRPC): " + request.getFilename() + " [" + uploadId + "]");
 
 		UploadResponse response = UploadResponse.newBuilder().setUploadId(uploadId).build();
 		responseObserver.onNext(response);
 		responseObserver.onCompleted();
 	}
 
+	// Helper to set folder (if coming from gRPC side later)
+	public void setUploadFolder(String uploadId, String folderId) {
+		if (folderId != null) {
+			UPLOAD_FOLDER_MAP.put(uploadId, folderId);
+		}
+	}
+
+	// --- 3. Chunk Check (Deduplication) ---
 	@Override
 	public void checkChunkExistence(ChunkCheckRequest request, StreamObserver<ChunkCheckResponse> responseObserver) {
 		List<Integer> missingIndices = new ArrayList<>();
 		List<String> incomingHashes = request.getChunkHashesList();
 
-		// Save the INTENDED order of chunks for this specific upload
 		UPLOAD_CHUNKS_MAP.put(request.getUploadId(), new ArrayList<>(incomingHashes));
 
 		for (int i = 0; i < incomingHashes.size(); i++) {
 			String hash = incomingHashes.get(i);
-
-			// HYBRID CHECK: Check DB (Metadata) AND MinIO (Physical Storage)
-			boolean dbHasIt = databaseService.hasChunk(hash);
+			boolean dbHasIt = databaseService.hasChunk(hash); // Hybrid Check
 
 			if (!dbHasIt) {
-				// We definitely need this chunk.
 				missingIndices.add(i);
 			} else {
-				System.out.println(">> Dedup: Chunk " + i + " exists globally.");
+				// System.out.println(">> Dedup: Chunk " + i + " exists globally.");
 			}
 		}
 
@@ -81,6 +92,7 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 		responseObserver.onCompleted();
 	}
 
+	// --- 4. Upload Stream ---
 	@Override
 	public StreamObserver<ChunkData> uploadChunk(StreamObserver<UploadStatus> responseObserver) {
 		return new StreamObserver<ChunkData>() {
@@ -89,12 +101,9 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 				String hash = chunk.getChunkHash();
 				byte[] data = chunk.getData().toByteArray();
 
-				// 1. Upload to MinIO (The Physical Layer)
 				if (!storageService.doesChunkExist(hash)) {
 					storageService.uploadChunk(hash, data);
-					System.out.println("Uploaded Chunk #" + chunk.getChunkIndex());
-				} else {
-					System.out.println("Skipped Upload #" + chunk.getChunkIndex() + " (Found in MinIO)");
+					// System.out.println("Uploaded Chunk #" + chunk.getChunkIndex());
 				}
 			}
 
@@ -111,51 +120,53 @@ public class DriveServiceImpl extends DriveServiceGrpc.DriveServiceImplBase {
 		};
 	}
 
+	// --- 5. Finalization (FIXED) ---
 	@Override
 	public void completeUpload(CompleteRequest request, StreamObserver<FileMetadata> responseObserver) {
 		String uploadId = request.getUploadId();
+
+		// Retrieve Session Data
 		UploadRequest originalInfo = CURRENT_UPLOADS.get(uploadId);
 		List<String> orderedHashes = UPLOAD_CHUNKS_MAP.get(uploadId);
 
+		// 1. SAFETY CHECK (Must be first)
 		if (originalInfo == null || orderedHashes == null) {
-			responseObserver.onError(new RuntimeException("Upload session not found!"));
+			responseObserver.onError(new RuntimeException("Upload session not found! ID: " + uploadId));
 			return;
 		}
 
-		// --- NEW: Get the currently logged-in user ---
+		// 2. Context Data
 		String username = SecurityContextHolder.getContext().getAuthentication().getName();
-		// ---------------------------------------------
-
 		String newFileId = UUID.randomUUID().toString();
+		String folderId = UPLOAD_FOLDER_MAP.get(uploadId); // Get Folder ID
 
-		// --- UPDATE: Pass username to save method ---
-		databaseService.saveFileMetadata(newFileId, originalInfo.getFilename(), originalInfo.getTotalSizeBytes(), username);
-		// 2. Link File -> Chunks in Postgres
+		// 3. Save Metadata (Single Call)
+		databaseService.saveFileMetadata(newFileId, originalInfo.getFilename(), originalInfo.getTotalSizeBytes(), username, folderId);
+
+		// 4. Link Chunks
 		for (int i = 0; i < orderedHashes.size(); i++) {
 			databaseService.addChunkToFile(newFileId, orderedHashes.get(i), i);
 		}
 
-		// --- 3. NEW: FIRE EVENT TO RABBITMQ ---
-		// We notify the worker queue that a file is ready for processing (Virus Scan/Thumbnail)
+		// 5. RabbitMQ Event
 		if (rabbitTemplate != null) {
 			String message = "FILE_ID:" + newFileId + "|NAME:" + originalInfo.getFilename();
 			try {
 				rabbitTemplate.convertAndSend("file-processing-queue", message);
-				System.out.println("⚡ EVENT: Published upload event to RabbitMQ: " + message);
+				System.out.println("⚡ EVENT: Sent to RabbitMQ: " + message);
 			} catch (Exception e) {
-				System.err.println("⚠️ Warning: RabbitMQ is down, but file was saved. Error: " + e.getMessage());
+				System.err.println("⚠️ RabbitMQ Error: " + e.getMessage());
 			}
-		} else {
-			System.err.println("⚠️ Warning: RabbitTemplate is null. Did you use @Autowired in DriveController?");
 		}
-		// --------------------------------------
 
-		// 4. Cleanup Memory
+		// 6. Cleanup Memory
 		CURRENT_UPLOADS.remove(uploadId);
 		UPLOAD_CHUNKS_MAP.remove(uploadId);
+		UPLOAD_FOLDER_MAP.remove(uploadId);
 
-		System.out.println("File Finalized: " + originalInfo.getFilename());
+		System.out.println("File Finalized: " + originalInfo.getFilename() + " (Folder: " + folderId + ")");
 
+		// 7. Response
 		FileMetadata metadata = FileMetadata.newBuilder()
 				.setFileId(newFileId)
 				.setVersion(1)
