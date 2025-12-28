@@ -1,6 +1,6 @@
 package com.minidrive.api;
 
-import com.minidrive.auth.AuthService; // Import AuthService
+import com.minidrive.auth.AuthService;
 import com.minidrive.db.DatabaseService;
 import com.minidrive.storage.StorageService;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -33,9 +33,9 @@ public class DriveController {
 	private RabbitTemplate rabbitTemplate;
 
 	@Autowired
-	private AuthService authService; // <--- ADD THIS MISSING DEPENDENCY
+	private AuthService authService;
 
-	// Session State
+	// Session State (In-Memory)
 	private static final Map<String, List<String>> UPLOAD_CHUNKS_MAP = new ConcurrentHashMap<>();
 	private static final Map<String, FileInfo> UPLOAD_METADATA_MAP = new ConcurrentHashMap<>();
 
@@ -82,13 +82,34 @@ public class DriveController {
 
 	// --- 4. UPLOAD FLOW ---
 	@PostMapping("/init")
-	public ResponseEntity<String> initUpload(
-			@RequestParam("filename") String filename,
-			@RequestParam("size") long size,
-			@RequestParam(value = "folderId", required = false) String folderId) {
+	public ResponseEntity<?> initUpload(@RequestParam("filename") String filename,
+										@RequestParam("size") long size,
+										@RequestParam(value = "folderId", required = false) String folderId,
+										Authentication auth) {
+		if (auth == null) return ResponseEntity.status(401).build();
+		String username = auth.getName();
+
+		// 1. Check Quota (Your Custom Logic)
+		Map<String, Long> stats = databaseService.getUserStats(username);
+		long currentFiles = stats.get("count");
+		long currentUsed = stats.get("used");
+
+		long LIMIT_1_FILE = 1024L * 1024 * 1024 * 1024; // 1 TB
+		long LIMIT_MULTI = 5L * 1024 * 1024 * 1024;     // 5 GB
+
+		if (currentFiles == 0) {
+			if (size > LIMIT_1_FILE) return ResponseEntity.status(400).body("File too large. Single file limit is 1TB.");
+		} else {
+			if ((currentUsed + size) > LIMIT_MULTI) return ResponseEntity.status(400).body("Storage Quota Exceeded. Multi-file limit is 5GB.");
+		}
+
+		// 2. Initialize Session
 		String uploadId = UUID.randomUUID().toString();
+
+		// FIX: Store metadata in the static maps so chunks can find it
+		UPLOAD_METADATA_MAP.put(uploadId, new FileInfo(filename, size, folderId != null ? folderId : "root"));
 		UPLOAD_CHUNKS_MAP.put(uploadId, new ArrayList<>());
-		UPLOAD_METADATA_MAP.put(uploadId, new FileInfo(filename, size, folderId));
+
 		return ResponseEntity.ok(uploadId);
 	}
 
@@ -149,7 +170,8 @@ public class DriveController {
 	@DeleteMapping("/{id}")
 	public ResponseEntity<?> deleteFile(@PathVariable String id, Authentication authentication) {
 		if (authentication == null) return ResponseEntity.status(401).build();
-		databaseService.toggleTrash(id, false, true); // Soft delete default
+		// Default to soft delete (Trash)
+		databaseService.toggleTrash(id, false, true);
 		return ResponseEntity.ok().build();
 	}
 
@@ -160,9 +182,20 @@ public class DriveController {
 		return ResponseEntity.ok().build();
 	}
 
-	// --- 6. VIEW & DOWNLOAD ---
+	// --- 6. SEARCH & STATS ---
+	@GetMapping("/search")
+	public ResponseEntity<List<Map<String, Object>>> search(@RequestParam String query, Authentication auth) {
+		if (auth == null) return ResponseEntity.status(401).build();
+		return ResponseEntity.ok(databaseService.searchFiles(query, auth.getName()));
+	}
 
-	// FIX: Clean logic for preview handling
+	@GetMapping("/stats")
+	public ResponseEntity<Map<String, Long>> getStats(Authentication auth) {
+		if (auth == null) return ResponseEntity.status(401).build();
+		return ResponseEntity.ok(databaseService.getUserStats(auth.getName()));
+	}
+
+	// --- 7. VIEW & SHARE & DOWNLOAD ---
 	@GetMapping("/view/{filename}")
 	public ResponseEntity<StreamingResponseBody> viewFile(
 			@PathVariable String filename,
@@ -170,26 +203,20 @@ public class DriveController {
 			Authentication authentication) {
 
 		String username = null;
-
-		// 1. Try Header Auth
 		if (authentication != null) {
 			username = authentication.getName();
-		}
-		// 2. Try Query Token (e.g. <img src="...?token=xyz">)
-		else if (token != null) {
+		} else if (token != null) {
 			username = authService.validateTokenAndGetUsername(token);
 		}
 
 		if (username == null) return ResponseEntity.status(401).build();
 
-		// 3. Find File
 		Map<String, Object> metadata = databaseService.getFileMetadata(filename, username);
 		if (metadata == null) return ResponseEntity.notFound().build();
 
 		String fileId = (String) metadata.get("id");
 		Long fileSize = (Long) metadata.get("size");
 
-		// 4. Content Type
 		String contentType = "application/octet-stream";
 		String lower = filename.toLowerCase();
 		if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) contentType = "image/jpeg";
@@ -198,7 +225,6 @@ public class DriveController {
 		else if (lower.endsWith(".pdf")) contentType = "application/pdf";
 		else if (lower.endsWith(".txt")) contentType = "text/plain";
 
-		// 5. Stream
 		List<String> chunks = databaseService.getFileChunks(fileId);
 		StreamingResponseBody stream = outputStream -> {
 			for (String hash : chunks) {
@@ -212,6 +238,13 @@ public class DriveController {
 				.contentLength(fileSize)
 				.contentType(MediaType.parseMediaType(contentType))
 				.body(stream);
+	}
+
+	@PostMapping("/share/{fileId}")
+	public ResponseEntity<String> shareFile(@PathVariable String fileId, Authentication auth) {
+		if (auth == null) return ResponseEntity.status(401).build();
+		String token = databaseService.createShareLink(fileId, auth.getName());
+		return ResponseEntity.ok(token);
 	}
 
 	@GetMapping("/download/{filename}")

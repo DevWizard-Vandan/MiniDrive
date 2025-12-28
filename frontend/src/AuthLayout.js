@@ -14,7 +14,14 @@ const AuthLayout = ({ children, title, subtitle }) => {
                     className="w-full md:w-1/2 p-12 flex flex-col justify-center relative z-10"
                 >
                     <div className="mb-8">
-                        <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-lg mb-4">M</div>
+                        {/* REBRANDING UPDATE: Changed 'M' to 'S' and added Brand Name */}
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-xl font-bold shadow-lg">
+                                S
+                            </div>
+                            <span className="text-xl font-bold text-slate-700 tracking-tight">SanchayCloud</span>
+                        </div>
+
                         <h1 className="text-3xl font-bold text-slate-800 mb-2">{title}</h1>
                         <p className="text-slate-500">{subtitle}</p>
                     </div>
@@ -40,9 +47,9 @@ const AuthLayout = ({ children, title, subtitle }) => {
                         className="w-[500px] h-[500px] border border-white/10 rounded-full absolute -bottom-40 -left-20"
                     />
                     <div className="relative z-10 text-white p-12">
-                        <h2 className="text-4xl font-bold mb-6">Secure Cloud Storage</h2>
+                        <h2 className="text-4xl font-bold mb-6">SanchayCloud</h2>
                         <p className="text-indigo-100 text-lg leading-relaxed">
-                            Store, share, and collaborate on files and folders from any mobile device, tablet, or computer.
+                            Your digital treasury. Secure, vast, and accessible from anywhere in the cosmos.
                         </p>
                     </div>
                 </motion.div>

@@ -42,7 +42,7 @@ public class DatabaseService {
 		try (Connection conn = dataSource.getConnection();
 			 Statement stmt = conn.createStatement()) {
 
-			// 1. Users Table
+			// 1. Users
 			stmt.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id UUID PRIMARY KEY,
@@ -52,20 +52,20 @@ public class DatabaseService {
                 )
             """);
 
-			// 2. Folders Table (With Trash/Star columns)
+			// 2. Folders (With Trash/Star columns)
 			stmt.execute("""
                 CREATE TABLE IF NOT EXISTS folders (
                     id UUID PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
                     parent_id UUID REFERENCES folders(id),
                     owner_id UUID REFERENCES users(id),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     is_trashed BOOLEAN DEFAULT FALSE,
-                    is_starred BOOLEAN DEFAULT FALSE
+                    is_starred BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """);
 
-			// 3. Files Table (With Trash/Star columns)
+			// 3. Files (With Trash, Star, and Share Token)
 			stmt.execute("""
                 CREATE TABLE IF NOT EXISTS files (
                     file_id UUID PRIMARY KEY,
@@ -73,9 +73,10 @@ public class DatabaseService {
                     size BIGINT,
                     owner_id UUID REFERENCES users(id),
                     folder_id UUID REFERENCES folders(id),
-                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     is_trashed BOOLEAN DEFAULT FALSE,
-                    is_starred BOOLEAN DEFAULT FALSE
+                    is_starred BOOLEAN DEFAULT FALSE,
+                    share_token VARCHAR(64) UNIQUE,  -- <--- THIS WAS MISSING
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """);
 
@@ -97,11 +98,61 @@ public class DatabaseService {
                 )
             """);
 
-			System.out.println("DB: Schema initialized successfully (Users + Folders + Files + Chunks)");
+			System.out.println("DB: Schema initialized successfully (Users + Folders + Files + Chunks + Sharing)");
 
 		} catch (SQLException e) {
 			e.printStackTrace();
 		}
+	}
+
+	// --- SEARCH FEATURE ---
+	public List<Map<String, Object>> searchFiles(String query, String username) {
+		List<Map<String, Object>> results = new ArrayList<>();
+		try (Connection conn = dataSource.getConnection()) {
+			String userId = getUserId(conn, username);
+
+			// Case-insensitive search (ILIKE is Postgres specific, use LIKE LOWER for compatibility)
+			PreparedStatement ps = conn.prepareStatement(
+					"SELECT file_id, filename, size, uploaded_at, is_starred FROM files " +
+							"WHERE owner_id = ?::uuid AND LOWER(filename) LIKE LOWER(?)"
+			);
+			ps.setString(1, userId);
+			ps.setString(2, "%" + query + "%");
+
+			ResultSet rs = ps.executeQuery();
+			while (rs.next()) {
+				results.add(Map.of(
+						"id", rs.getString("file_id"),
+						"name", rs.getString("filename"),
+						"size", rs.getLong("size"),
+						"type", "file", // Search results don't show folders in this version
+						"starred", rs.getBoolean("is_starred"),
+						"date", rs.getTimestamp("uploaded_at").toString()
+				));
+			}
+		} catch (SQLException e) { e.printStackTrace(); }
+		return results;
+	}
+
+	// --- QUOTA & STATS ---
+	public Map<String, Long> getUserStats(String username) {
+		try (Connection conn = dataSource.getConnection()) {
+			String userId = getUserId(conn, username);
+
+			PreparedStatement ps = conn.prepareStatement(
+					"SELECT COUNT(*) as cnt, COALESCE(SUM(size), 0) as total_size FROM files WHERE owner_id = ?::uuid"
+			);
+			ps.setString(1, userId);
+			ResultSet rs = ps.executeQuery();
+
+			if (rs.next()) {
+				return Map.of(
+						"count", rs.getLong("cnt"),
+						"used", rs.getLong("total_size")
+				);
+			}
+		} catch (SQLException e) { e.printStackTrace(); }
+		return Map.of("count", 0L, "used", 0L);
 	}
 
 	// --- METADATA & UPLOAD METHODS ---
@@ -423,6 +474,45 @@ public class DatabaseService {
 		} catch (SQLException e) {
 			e.printStackTrace();
 		}
+	}
+
+	// --- SHARING ---
+
+	// 1. Generate a Share Token
+	public String createShareLink(String fileId, String username) {
+		String token = UUID.randomUUID().toString().substring(0, 8); // Short random ID
+		try (Connection conn = dataSource.getConnection()) {
+			PreparedStatement ps = conn.prepareStatement(
+					"UPDATE files SET share_token = ? WHERE file_id = ? AND owner_id = (SELECT id FROM users WHERE username = ?)"
+			);
+			ps.setString(1, token);
+			ps.setObject(2, UUID.fromString(fileId));
+			ps.setString(3, username);
+			ps.executeUpdate();
+			return token;
+		} catch (SQLException e) {
+			e.printStackTrace();
+			return null;
+		}
+	}
+
+	// 2. Find File by Share Token (No username needed!)
+	public Map<String, Object> getFileByShareToken(String token) {
+		try (Connection conn = dataSource.getConnection()) {
+			PreparedStatement ps = conn.prepareStatement(
+					"SELECT file_id, filename, size FROM files WHERE share_token = ?"
+			);
+			ps.setString(1, token);
+			ResultSet rs = ps.executeQuery();
+			if (rs.next()) {
+				return Map.of(
+						"id", rs.getString("file_id"),
+						"name", rs.getString("filename"),
+						"size", rs.getLong("size")
+				);
+			}
+		} catch (SQLException e) { e.printStackTrace(); }
+		return null;
 	}
 
 	public Map<String, Object> getFileMetadata(String filename, String username) {

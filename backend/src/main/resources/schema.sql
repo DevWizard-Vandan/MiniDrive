@@ -48,3 +48,6 @@ CREATE TABLE global_chunks (
                                chunk_hash VARCHAR(64) PRIMARY KEY,
                                ref_count INT DEFAULT 1
 );
+
+-- 7. HOTFIX: Add Share Token
+ALTER TABLE files ADD COLUMN IF NOT EXISTS share_token VARCHAR(64) UNIQUE;

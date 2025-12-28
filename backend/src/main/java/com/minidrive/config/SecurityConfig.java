@@ -25,11 +25,13 @@ public class SecurityConfig {
 		http
 				.csrf(csrf -> csrf.disable())
 				.cors(cors -> cors.configurationSource(corsConfigurationSource()))
+				// 1. Allow Frames (Fixes the PDF Preview Error)
+				.headers(headers -> headers.frameOptions(frame -> frame.disable()))
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers("/api/auth/**").permitAll()
-						.anyRequest().authenticated() // LOCK IT DOWN: Require login for everything else
+						.requestMatchers("/api/public/**").permitAll() // <--- MUST BE HERE
+						.anyRequest().authenticated()
 				)
-				// ADD THIS LINE: Run our JWT filter before the standard login filter
 				.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
 		return http.build();
