@@ -24,15 +24,22 @@ public class JwtFilter extends OncePerRequestFilter {
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
 
-		// 1. Get Header
+		String token = null;
 		String authHeader = request.getHeader("Authorization");
 
-		// 2. Check if valid Bearer token
+		// 1. Try to get token from Header
 		if (authHeader != null && authHeader.startsWith("Bearer ")) {
-			String token = authHeader.substring(7); // Remove "Bearer "
+			token = authHeader.substring(7);
+		}
+		// 2. Fallback: Try to get token from Query Parameter (For Images/Videos)
+		else if (request.getParameter("token") != null) {
+			token = request.getParameter("token");
+		}
+
+		// 3. Validate Token
+		if (token != null) {
 			String username = authService.validateTokenAndGetUsername(token);
 
-			// 3. Set Authentication
 			if (username != null) {
 				UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
 						username, null, Collections.emptyList());
@@ -40,7 +47,6 @@ public class JwtFilter extends OncePerRequestFilter {
 			}
 		}
 
-		// 4. Continue
 		filterChain.doFilter(request, response);
 	}
 }

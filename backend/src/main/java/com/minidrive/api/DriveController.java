@@ -1,5 +1,6 @@
 package com.minidrive.api;
 
+import com.minidrive.auth.AuthService; // Import AuthService
 import com.minidrive.db.DatabaseService;
 import com.minidrive.storage.StorageService;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -31,79 +32,66 @@ public class DriveController {
 	@Autowired
 	private RabbitTemplate rabbitTemplate;
 
-	// Session State (Tracks active uploads in memory)
+	@Autowired
+	private AuthService authService; // <--- ADD THIS MISSING DEPENDENCY
+
+	// Session State
 	private static final Map<String, List<String>> UPLOAD_CHUNKS_MAP = new ConcurrentHashMap<>();
 	private static final Map<String, FileInfo> UPLOAD_METADATA_MAP = new ConcurrentHashMap<>();
 
-	// --- 1. UNIFIED CONTENT API (Files + Folders + Filters) ---
-	// This matches what Dashboard.js calls
+	// --- 1. CONTENT API ---
 	@GetMapping("/content")
 	public ResponseEntity<?> getContent(
 			@RequestParam(required = false) String folderId,
-			@RequestParam(required = false) String filter, // 'trash', 'starred', 'recent'
+			@RequestParam(required = false) String filter,
 			Authentication auth) {
-
 		if (auth == null) return ResponseEntity.status(401).build();
-
-		// Frontend sends "root" string, DB expects null for root
 		String dbFolderId = "root".equals(folderId) ? null : folderId;
-
 		return ResponseEntity.ok(databaseService.getFilesByFilter(filter, dbFolderId, auth.getName()));
 	}
 
-	// --- 2. CREATE FOLDER ---
+	// --- 2. FOLDERS ---
 	@PostMapping("/folders")
 	public ResponseEntity<?> createFolder(@RequestBody Map<String, String> body, Authentication auth) {
 		if (auth == null) return ResponseEntity.status(401).build();
-
-		String name = body.get("name");
-		String parentId = body.get("parentId");
-
-		databaseService.createFolder(name, parentId, auth.getName());
+		databaseService.createFolder(body.get("name"), body.get("parentId"), auth.getName());
 		return ResponseEntity.ok().build();
 	}
 
-	// --- 3. ACTIONS (Trash & Star) ---
+	// --- 3. ACTIONS ---
 	@PostMapping("/action/trash")
 	public ResponseEntity<?> trashItem(@RequestBody Map<String, Object> body, Authentication auth) {
 		if (auth == null) return ResponseEntity.status(401).build();
-		String id = (String) body.get("id");
-		String type = (String) body.get("type"); // 'file' or 'folder'
-		boolean trash = (Boolean) body.get("value");
-
-		databaseService.toggleTrash(id, "folder".equals(type), trash);
+		databaseService.toggleTrash((String) body.get("id"), "folder".equals(body.get("type")), (Boolean) body.get("value"));
 		return ResponseEntity.ok().build();
 	}
 
 	@PostMapping("/action/star")
 	public ResponseEntity<?> starItem(@RequestBody Map<String, Object> body, Authentication auth) {
 		if (auth == null) return ResponseEntity.status(401).build();
-		String id = (String) body.get("id");
-		String type = (String) body.get("type");
-		boolean star = (Boolean) body.get("value");
-
-		databaseService.toggleStar(id, "folder".equals(type), star);
+		databaseService.toggleStar((String) body.get("id"), "folder".equals(body.get("type")), (Boolean) body.get("value"));
 		return ResponseEntity.ok().build();
 	}
 
-	// --- 4. INITIATE UPLOAD ---
+	@PostMapping("/action/move")
+	public ResponseEntity<?> moveItem(@RequestBody Map<String, Object> body, Authentication auth) {
+		if (auth == null) return ResponseEntity.status(401).build();
+		databaseService.moveEntity((String) body.get("id"), "folder".equals(body.get("type")), (String) body.get("targetId"), auth.getName());
+		return ResponseEntity.ok().build();
+	}
+
+	// --- 4. UPLOAD FLOW ---
 	@PostMapping("/init")
 	public ResponseEntity<String> initUpload(
 			@RequestParam("filename") String filename,
 			@RequestParam("size") long size,
 			@RequestParam(value = "folderId", required = false) String folderId) {
-
 		String uploadId = UUID.randomUUID().toString();
-
-		// Initialize session state
 		UPLOAD_CHUNKS_MAP.put(uploadId, new ArrayList<>());
 		UPLOAD_METADATA_MAP.put(uploadId, new FileInfo(filename, size, folderId));
-
-		System.out.println("REST: Started upload [" + uploadId + "] for " + filename);
 		return ResponseEntity.ok(uploadId);
 	}
 
-	// --- 5. UPLOAD CHUNK ---
 	@PostMapping("/upload/chunk")
 	public ResponseEntity<String> uploadChunk(
 			@RequestParam("uploadId") String uploadId,
@@ -121,19 +109,13 @@ public class DriveController {
 
 			if (!storageService.doesChunkExist(hash)) {
 				storageService.uploadChunk(hash, chunkData.getBytes());
-				System.out.println("REST: Uploaded chunk #" + index);
-			} else {
-				System.out.println("REST: Deduped chunk #" + index);
 			}
-
 			return ResponseEntity.ok("Received");
-
 		} catch (IOException e) {
 			return ResponseEntity.status(500).body("Error processing chunk");
 		}
 	}
 
-	// --- 6. COMPLETE UPLOAD ---
 	@PostMapping("/complete")
 	public ResponseEntity<String> completeUpload(@RequestParam("uploadId") String uploadId) {
 		FileInfo info = UPLOAD_METADATA_MAP.get(uploadId);
@@ -143,81 +125,103 @@ public class DriveController {
 
 		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 		String username = (auth != null) ? auth.getName() : "anonymous";
-
 		String newFileId = UUID.randomUUID().toString();
 
-		// SAVE METADATA (Now with folderId)
 		databaseService.saveFileMetadata(newFileId, info.name, info.size, username, info.folderId);
 
-		// LINK CHUNKS
 		for (int i = 0; i < hashes.size(); i++) {
 			if (hashes.get(i) == null) return ResponseEntity.status(400).body("Missing chunk #" + i);
 			databaseService.addChunkToFile(newFileId, hashes.get(i), i);
 		}
 
-		// RABBITMQ EVENT
 		if (rabbitTemplate != null) {
-			String message = "FILE_ID:" + newFileId + "|NAME:" + info.name;
 			try {
-				rabbitTemplate.convertAndSend("file-processing-queue", message);
-				System.out.println("⚡ REST: Published event to RabbitMQ: " + message);
-			} catch (Exception e) {
-				System.err.println("⚠️ Warning: RabbitMQ down");
-			}
+				rabbitTemplate.convertAndSend("file-processing-queue", "FILE_ID:" + newFileId + "|NAME:" + info.name);
+			} catch (Exception e) { /* RabbitMQ Down */ }
 		}
 
-		// CLEANUP
 		UPLOAD_METADATA_MAP.remove(uploadId);
 		UPLOAD_CHUNKS_MAP.remove(uploadId);
-
-		System.out.println("REST: Finalized file " + info.name);
 		return ResponseEntity.ok(newFileId);
 	}
 
-	// --- 7. DELETE FILE ---
+	// --- 5. DELETION ---
 	@DeleteMapping("/{id}")
 	public ResponseEntity<?> deleteFile(@PathVariable String id, Authentication authentication) {
 		if (authentication == null) return ResponseEntity.status(401).build();
-		// Since we are using "Trash" logic now, this endpoint handles permanent deletion
-		// OR the frontend calls trash action instead.
-		// For simple compatibility, let's map DELETE verb to "Move to Trash" if not already there
-		databaseService.toggleTrash(id, false, true); // Assuming it's a file for now
+		databaseService.toggleTrash(id, false, true); // Soft delete default
 		return ResponseEntity.ok().build();
 	}
 
-
-	// CHANGE URL: Add "/permanent" suffix
 	@DeleteMapping("/{id}/permanent")
 	public ResponseEntity<?> deletePermanently(@PathVariable String id, Authentication auth) {
 		if (auth == null) return ResponseEntity.status(401).build();
-
 		databaseService.deleteEntityById(id, auth.getName());
 		return ResponseEntity.ok().build();
 	}
 
-	// Move Item
-	@PostMapping("/action/move")
-	public ResponseEntity<?> moveItem(@RequestBody Map<String, Object> body, Authentication auth) {
-		if (auth == null) return ResponseEntity.status(401).build();
+	// --- 6. VIEW & DOWNLOAD ---
 
-		String id = (String) body.get("id");
-		String type = (String) body.get("type"); // 'file' or 'folder'
-		String targetId = (String) body.get("targetId"); // ID or null (for root)
+	// FIX: Clean logic for preview handling
+	@GetMapping("/view/{filename}")
+	public ResponseEntity<StreamingResponseBody> viewFile(
+			@PathVariable String filename,
+			@RequestParam(required = false) String token,
+			Authentication authentication) {
 
-		databaseService.moveEntity(id, "folder".equals(type), targetId, auth.getName());
-		return ResponseEntity.ok().build();
+		String username = null;
+
+		// 1. Try Header Auth
+		if (authentication != null) {
+			username = authentication.getName();
+		}
+		// 2. Try Query Token (e.g. <img src="...?token=xyz">)
+		else if (token != null) {
+			username = authService.validateTokenAndGetUsername(token);
+		}
+
+		if (username == null) return ResponseEntity.status(401).build();
+
+		// 3. Find File
+		Map<String, Object> metadata = databaseService.getFileMetadata(filename, username);
+		if (metadata == null) return ResponseEntity.notFound().build();
+
+		String fileId = (String) metadata.get("id");
+		Long fileSize = (Long) metadata.get("size");
+
+		// 4. Content Type
+		String contentType = "application/octet-stream";
+		String lower = filename.toLowerCase();
+		if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) contentType = "image/jpeg";
+		else if (lower.endsWith(".png")) contentType = "image/png";
+		else if (lower.endsWith(".mp4")) contentType = "video/mp4";
+		else if (lower.endsWith(".pdf")) contentType = "application/pdf";
+		else if (lower.endsWith(".txt")) contentType = "text/plain";
+
+		// 5. Stream
+		List<String> chunks = databaseService.getFileChunks(fileId);
+		StreamingResponseBody stream = outputStream -> {
+			for (String hash : chunks) {
+				outputStream.write(storageService.downloadChunk(hash));
+				outputStream.flush();
+			}
+		};
+
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+				.contentLength(fileSize)
+				.contentType(MediaType.parseMediaType(contentType))
+				.body(stream);
 	}
 
-	// --- 8. DOWNLOAD FILE ---
 	@GetMapping("/download/{filename}")
 	public ResponseEntity<StreamingResponseBody> downloadFile(
 			@PathVariable String filename,
 			Authentication authentication) {
 
 		if (authentication == null) return ResponseEntity.status(401).build();
-		String username = authentication.getName();
 
-		Map<String, Object> metadata = databaseService.getFileMetadata(filename, username);
+		Map<String, Object> metadata = databaseService.getFileMetadata(filename, authentication.getName());
 		if (metadata == null) return ResponseEntity.notFound().build();
 
 		String fileId = (String) metadata.get("id");
@@ -226,8 +230,7 @@ public class DriveController {
 
 		StreamingResponseBody stream = outputStream -> {
 			for (String hash : chunks) {
-				byte[] data = storageService.downloadChunk(hash);
-				outputStream.write(data);
+				outputStream.write(storageService.downloadChunk(hash));
 				outputStream.flush();
 			}
 		};
@@ -239,6 +242,5 @@ public class DriveController {
 				.body(stream);
 	}
 
-	// Internal Record
 	record FileInfo(String name, long size, String folderId) {}
 }

@@ -6,7 +6,7 @@ import {
   UploadCloud, File, FileImage, FileVideo, FileText,
   Grid, List as ListIcon, HardDrive, Clock, Star, Trash2,
   Download, ChevronRight, Folder, FolderPlus, X, ChevronDown,
-  RefreshCw, XCircle, MoreVertical, Share2, Info, Move
+  RefreshCw, XCircle, MoreVertical, Share2, Info
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -25,8 +25,9 @@ const formatBytes = (bytes, decimals = 2) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
 };
 
-// --- ITEM CARD (Draggable) ---
-const ItemCard = ({ item, type, onAction, onNavigate, onMove, isTrashView, onContextMenu }) => {
+// --- COMPONENTS ---
+
+const ItemCard = ({ item, type, onNavigate, onMove, isTrashView, onContextMenu }) => {
   const isFolder = type === 'folder';
   let Icon = File;
   let color = "bg-gray-50 text-gray-400";
@@ -39,32 +40,26 @@ const ItemCard = ({ item, type, onAction, onNavigate, onMove, isTrashView, onCon
     if (['pdf', 'doc', 'txt'].includes(ext)) { color = "bg-blue-100 text-blue-600"; Icon = FileText; }
   }
 
-  // Drag Handlers
   const handleDragStart = (e) => {
     e.dataTransfer.setData("itemId", item.id);
     e.dataTransfer.setData("itemType", type);
   };
 
   const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     const draggedId = e.dataTransfer.getData("itemId");
     const draggedType = e.dataTransfer.getData("itemType");
-
-    // Prevent dropping onto itself or if not a folder
-    if (isFolder && draggedId !== item.id) {
-      onMove(draggedId, draggedType, item.id);
-    }
+    if (isFolder && draggedId !== item.id) onMove(draggedId, draggedType, item.id);
   };
 
   return (
       <motion.div
           layout
-          draggable={!isTrashView} // Enable drag
+          draggable={!isTrashView}
           onDragStart={handleDragStart}
-          onDragOver={(e) => isFolder && e.preventDefault()} // Allow drop on folders
+          onDragOver={(e) => isFolder && e.preventDefault()}
           onDrop={handleDrop}
-          onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, item, type); }} // Custom Right Click
+          onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, item, type); }}
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
@@ -85,62 +80,46 @@ const ItemCard = ({ item, type, onAction, onNavigate, onMove, isTrashView, onCon
   );
 };
 
-// --- CONTEXT MENU COMPONENT ---
-const ContextMenu = ({ x, y, item, type, onClose, onAction, isTrashView }) => {
-  return (
-      <div
-          className="fixed z-50 bg-white rounded-lg shadow-xl border border-slate-200 w-48 py-1 animate-fade-in"
-          style={{ top: y, left: x }}
-          onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header Info */}
-        <div className="px-4 py-2 border-b border-slate-100 mb-1">
-          <p className="text-xs font-semibold text-slate-500 truncate">{item.name}</p>
-        </div>
+const ContextMenu = ({ x, y, item, type, onClose, onAction, isTrashView }) => (
+    <div className="fixed z-50 bg-white rounded-lg shadow-xl border border-slate-200 w-48 py-1 animate-fade-in" style={{ top: y, left: x }} onClick={(e) => e.stopPropagation()}>
+      <div className="px-4 py-2 border-b border-slate-100 mb-1"><p className="text-xs font-semibold text-slate-500 truncate">{item.name}</p></div>
+      {isTrashView ? (
+          <>
+            <button onClick={() => { onAction('restore', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-green-600 hover:bg-slate-50 flex items-center gap-2"><RefreshCw size={14} /> Restore</button>
+            <button onClick={() => { onAction('permanentDelete', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-slate-50 flex items-center gap-2"><XCircle size={14} /> Delete Forever</button>
+          </>
+      ) : (
+          <>
+            {type === 'folder' && <button onClick={() => { onAction('open', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><Folder size={14} /> Open</button>}
+            {type !== 'folder' && <button onClick={() => { onAction('preview', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><File size={14} /> Preview</button>}
+            <button onClick={() => { onAction('download', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><Download size={14} /> Download</button>
+            <button onClick={() => { onAction('star', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><Star size={14} /> {item.starred ? 'Unstar' : 'Add to Starred'}</button>
+            <button onClick={() => { onAction('info', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><Info size={14} /> Properties</button>
+            <div className="h-px bg-slate-100 my-1" />
+            <button onClick={() => { onAction('trash', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-slate-50 flex items-center gap-2"><Trash2 size={14} /> Move to Trash</button>
+          </>
+      )}
+    </div>
+);
 
-        {isTrashView ? (
-            <>
-              <button onClick={() => { onAction('restore', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-green-600 hover:bg-slate-50 flex items-center gap-2"><RefreshCw size={14} /> Restore</button>
-              <button onClick={() => { onAction('permanentDelete', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-slate-50 flex items-center gap-2"><XCircle size={14} /> Delete Forever</button>
-            </>
-        ) : (
-            <>
-              {type === 'folder' && (
-                  <button onClick={() => { onAction('open', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><Folder size={14} /> Open</button>
-              )}
-              {type !== 'folder' && (
-                  <button onClick={() => { onAction('download', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><Download size={14} /> Download</button>
-              )}
-              <button onClick={() => { onAction('star', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><Star size={14} /> {item.starred ? 'Unstar' : 'Add to Starred'}</button>
-              <button onClick={() => { onAction('info', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><Info size={14} /> Properties</button>
-              <button onClick={() => { onAction('share', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"><Share2 size={14} /> Share</button>
-              <div className="h-px bg-slate-100 my-1" />
-              <button onClick={() => { onAction('trash', item); onClose(); }} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-slate-50 flex items-center gap-2"><Trash2 size={14} /> Move to Trash</button>
-            </>
-        )}
-      </div>
-  );
-};
-
-// --- DASHBOARD ---
+// --- MAIN DASHBOARD ---
 const Dashboard = () => {
   const [content, setContent] = useState({ folders: [], files: [] });
   const [currentView, setCurrentView] = useState('drive');
   const [currentFolder, setCurrentFolder] = useState(null);
   const [breadcrumbs, setBreadcrumbs] = useState([{ id: null, name: 'My Drive' }]);
 
-  // UI State
   const [progress, setProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [showInfoModal, setShowInfoModal] = useState(null); // Item for info modal
+  const [previewFile, setPreviewFile] = useState(null);
+  const [showInfoModal, setShowInfoModal] = useState(null);
+  const [menuPos, setMenuPos] = useState(null);
+
   const [newFolderName, setNewFolderName] = useState("");
   const [viewMode, setViewMode] = useState("grid");
   const [sortBy, setSortBy] = useState("date");
-
-  // Context Menu State
-  const [menuPos, setMenuPos] = useState(null); // {x, y, item, type}
 
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
@@ -148,8 +127,6 @@ const Dashboard = () => {
   const CHUNK_SIZE = 1024 * 1024;
 
   useEffect(() => { fetchContent(); }, [currentFolder, currentView]);
-
-  // Close context menu on global click
   useEffect(() => {
     const handleClick = () => setMenuPos(null);
     window.addEventListener('click', handleClick);
@@ -158,115 +135,71 @@ const Dashboard = () => {
 
   const fetchContent = async () => {
     try {
-      let url = `/drive/content`;
-      let params = {};
-      if (currentView === 'drive') {
-        if (currentFolder) params.folderId = currentFolder;
-      } else {
-        params.filter = currentView;
-      }
-      const res = await api.get(url, { params });
+      let params = currentView === 'drive' ? (currentFolder ? { folderId: currentFolder } : {}) : { filter: currentView };
+      const res = await api.get('/drive/content', { params });
       setContent(res.data);
-    } catch (error) {
-      if (error.response?.status === 403) navigate('/login');
-    }
+    } catch (error) { if (error.response?.status === 403) navigate('/login'); }
   };
 
-  const handleContextMenu = (e, item, type) => {
-    e.preventDefault(); // Stop default browser menu
-    setMenuPos({ x: e.clientX, y: e.clientY, item, type });
+  const handleAction = async (action, item) => {
+    const type = item.type || (content.folders.find(f => f.id === item.id) ? 'folder' : 'file');
+    try {
+      if (action === 'open') {
+        if (type === 'folder') { setCurrentFolder(item.id); setBreadcrumbs(prev => [...prev, {id: item.id, name: item.name}]); }
+        else setPreviewFile(item);
+      }
+      else if (action === 'preview') setPreviewFile(item);
+      else if (action === 'download') {
+        const res = await api.get(`/drive/download/${item.name}`, { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const link = document.createElement('a'); link.href = url; link.download = item.name;
+        document.body.appendChild(link); link.click(); link.remove();
+      }
+      else if (action === 'trash' || action === 'restore') {
+        await api.post('/drive/action/trash', { id: item.id, type, value: action === 'trash' });
+        toast.success(action === 'trash' ? "Moved to Trash" : "Restored"); fetchContent();
+      }
+      else if (action === 'permanentDelete') {
+        if (window.confirm("Delete forever?")) { await api.delete(`/drive/${item.id}/permanent`); toast.success("Deleted"); fetchContent(); }
+      }
+      else if (action === 'star') {
+        await api.post('/drive/action/star', { id: item.id, type, value: !item.starred }); fetchContent();
+      }
+      else if (action === 'info') setShowInfoModal(item);
+    } catch (err) { toast.error("Action failed"); }
   };
 
   const handleMoveItem = async (itemId, type, targetFolderId) => {
     try {
       await api.post('/drive/action/move', { id: itemId, type, targetId: targetFolderId });
-      toast.success("Moved successfully");
-      fetchContent();
-    } catch (err) { toast.error("Failed to move item"); }
-  };
-
-  const handleAction = async (action, item) => {
-    const type = item.type || (content.folders.find(f => f.id === item.id) ? 'folder' : 'file');
-
-    try {
-      if (action === 'open') {
-        setCurrentFolder(item.id);
-        setBreadcrumbs(prev => [...prev, {id: item.id, name: item.name}]);
-      }
-      else if (action === 'download') {
-        const res = await api.get(`/drive/download/${item.name}`, { responseType: 'blob' });
-        const url = window.URL.createObjectURL(new Blob([res.data]));
-        const link = document.createElement('a');
-        link.href = url; link.download = item.name;
-        document.body.appendChild(link); link.click(); link.remove();
-      }
-      else if (action === 'trash' || action === 'restore') {
-        await api.post('/drive/action/trash', { id: item.id, type, value: action === 'trash' });
-        toast.success(action === 'trash' ? "Moved to Trash" : "Restored");
-        fetchContent();
-      }
-      else if (action === 'permanentDelete') {
-        if (!window.confirm("Delete forever?")) return;
-        await api.delete(`/drive/${item.id}/permanent`);
-        toast.success("Deleted permanently");
-        fetchContent();
-      }
-      else if (action === 'star') {
-        await api.post('/drive/action/star', { id: item.id, type, value: !item.starred });
-        toast.success(!item.starred ? "Starred" : "Unstarred");
-        fetchContent();
-      }
-      else if (action === 'share') {
-        navigator.clipboard.writeText(`http://minidrive.com/share/${item.id}`);
-        toast.success("Link copied to clipboard (Mock)");
-      }
-      else if (action === 'info') {
-        setShowInfoModal(item);
-      }
-    } catch (err) { console.error(err); }
-  };
-
-  // ... (Create Folder, Upload, Sort - Same as before) ...
-  const createFolder = async (e) => {
-    e.preventDefault();
-    try {
-      await api.post('/drive/folders', { name: newFolderName, parentId: currentFolder });
-      setNewFolderName(""); setShowCreateFolder(false); fetchContent();
-    } catch (err) { alert("Failed"); }
+      toast.success("Moved successfully"); fetchContent();
+    } catch (err) { toast.error("Move failed"); }
   };
 
   const handleUpload = async (file) => {
     setProgress(1);
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     try {
-      const formData = new FormData();
-      formData.append('filename', file.name);
-      formData.append('size', file.size);
+      const formData = new FormData(); formData.append('filename', file.name); formData.append('size', file.size);
       if (currentFolder) formData.append('folderId', currentFolder);
-
       const initRes = await api.post('/drive/init', formData);
       const uploadId = initRes.data;
-
       for (let i = 0; i < totalChunks; i++) {
         const chunk = file.slice(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, file.size));
-        const chunkData = new FormData();
-        chunkData.append('uploadId', uploadId);
-        chunkData.append('index', i);
-        chunkData.append('hash', await calculateHash(chunk));
-        chunkData.append('chunk', chunk);
+        const chunkData = new FormData(); chunkData.append('uploadId', uploadId); chunkData.append('index', i);
+        chunkData.append('hash', await calculateHash(chunk)); chunkData.append('chunk', chunk);
         await api.post('/drive/upload/chunk', chunkData);
         setProgress(Math.round(((i + 1) / totalChunks) * 100));
       }
       await api.post(`/drive/complete?uploadId=${uploadId}`);
-      fetchContent(); setTimeout(() => setProgress(0), 1000);
-      toast.success("Upload Complete");
-    } catch (error) { toast.error("Upload Failed"); setProgress(0); }
+      fetchContent(); setTimeout(() => setProgress(0), 1000); toast.success("Uploaded");
+    } catch (error) { toast.error("Upload failed"); setProgress(0); }
   };
 
   const getSortedItems = (items) => {
     let sorted = [...items];
     if (sortBy === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name));
-    if (sortBy === 'size') sorted.sort((a, b) => (b.size || 0) - (a.size || 0));
+    else if (sortBy === 'size') sorted.sort((a, b) => (b.size || 0) - (a.size || 0));
     else sorted.sort((a, b) => new Date(b.date) - new Date(a.date));
     return sorted;
   };
@@ -277,23 +210,15 @@ const Dashboard = () => {
       <div className="flex h-screen bg-slate-50 font-sans text-slate-800" onContextMenu={(e) => e.preventDefault()}>
         <input type="file" ref={fileInputRef} onChange={(e) => Array.from(e.target.files).forEach(handleUpload)} className="hidden" multiple />
 
-        {/* Context Menu */}
-        {menuPos && (
-            <ContextMenu
-                x={menuPos.x} y={menuPos.y}
-                item={menuPos.item} type={menuPos.type}
-                onClose={() => setMenuPos(null)}
-                onAction={handleAction}
-                isTrashView={currentView === 'trash'}
-            />
-        )}
+        {/* CONTEXT MENU */}
+        {menuPos && <ContextMenu {...menuPos} onClose={() => setMenuPos(null)} onAction={handleAction} isTrashView={currentView === 'trash'} />}
 
         {/* SIDEBAR */}
         <aside className="w-64 bg-white border-r border-slate-200 flex flex-col hidden md:flex">
           <div className="p-6">
-            <div className="flex items-center gap-3 text-indigo-600 mb-8"><div className="p-2 bg-indigo-100 rounded-lg"><HardDrive size={24} /></div><h1 className="text-xl font-bold tracking-tight">MiniDrive</h1></div>
-            <button onClick={() => fileInputRef.current.click()} className="w-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all mb-4 active:scale-95"><UploadCloud size={20} /> Upload File</button>
-            <button onClick={() => setShowCreateFolder(true)} className="w-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all mb-6 active:scale-95"><FolderPlus size={20} /> New Folder</button>
+            <div className="flex items-center gap-3 text-indigo-600 mb-8"><div className="p-2 bg-indigo-100 rounded-lg"><HardDrive size={24} /></div><h1 className="text-xl font-bold">MiniDrive</h1></div>
+            <button onClick={() => fileInputRef.current.click()} className="w-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 mb-4 active:scale-95"><UploadCloud size={20} /> Upload File</button>
+            <button onClick={() => setShowCreateFolder(true)} className="w-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 mb-6 active:scale-95"><FolderPlus size={20} /> New Folder</button>
             <nav className="space-y-1">
               <button onClick={() => { setCurrentView('drive'); setCurrentFolder(null); setBreadcrumbs([{id:null, name:'My Drive'}]); }} className={navClass('drive')}><HardDrive size={18} /> My Drive</button>
               <button onClick={() => setCurrentView('recent')} className={navClass('recent')}><Clock size={18} /> Recent</button>
@@ -302,32 +227,20 @@ const Dashboard = () => {
             </nav>
           </div>
           <div className="mt-auto p-6 border-t border-slate-100 cursor-pointer" onClick={() => setShowProfile(true)}>
-            <div className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg transition-colors">
-              <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold text-sm">{username.charAt(0).toUpperCase()}</div>
-              <div className="flex-1 min-w-0"><p className="text-sm font-medium text-slate-700 truncate">{username}</p><p className="text-xs text-slate-400">View Profile</p></div>
-            </div>
+            <div className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg"><div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold text-sm">{username.charAt(0).toUpperCase()}</div><div className="flex-1 min-w-0"><p className="text-sm font-medium text-slate-700 truncate">{username}</p><p className="text-xs text-slate-400">View Profile</p></div></div>
           </div>
         </aside>
 
         {/* MAIN */}
         <main className="flex-1 flex flex-col overflow-hidden relative" onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); Array.from(e.dataTransfer.files).forEach(handleUpload); }}>
           <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8">
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              {currentView !== 'drive' ? <span className="font-bold text-slate-800 capitalize">{currentView}</span> : breadcrumbs.map((crumb, idx) => (
-                  <div key={idx} className="flex items-center"><span onClick={() => { setCurrentFolder(crumb.id); setBreadcrumbs(prev => prev.slice(0, idx + 1)); }} className={`cursor-pointer hover:text-indigo-600 ${idx === breadcrumbs.length - 1 ? 'font-bold text-slate-800' : ''}`}>{crumb.name}</span>{idx < breadcrumbs.length - 1 && <ChevronRight size={14} className="mx-2" />}</div>
-              ))}
-            </div>
+            <div className="flex items-center gap-2 text-sm text-slate-500">{currentView !== 'drive' ? <span className="font-bold text-slate-800 capitalize">{currentView}</span> : breadcrumbs.map((crumb, idx) => (<div key={idx} className="flex items-center"><span onClick={() => { setCurrentFolder(crumb.id); setBreadcrumbs(prev => prev.slice(0, idx + 1)); }} className={`cursor-pointer hover:text-indigo-600 ${idx === breadcrumbs.length - 1 ? 'font-bold text-slate-800' : ''}`}>{crumb.name}</span>{idx < breadcrumbs.length - 1 && <ChevronRight size={14} className="mx-2" />}</div>))}</div>
             <div className="flex items-center gap-4">
               <div className="relative group">
                 <button className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:bg-slate-100 px-3 py-2 rounded-lg transition-colors">Sort: <span className="text-indigo-600 capitalize">{sortBy}</span> <ChevronDown size={16} /></button>
-                <div className="absolute right-0 top-full mt-2 w-32 bg-white border border-slate-200 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">
-                  {['date', 'name', 'size'].map(opt => <button key={opt} onClick={() => setSortBy(opt)} className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 first:rounded-t-xl last:rounded-b-xl capitalize">{opt}</button>)}
-                </div>
+                <div className="absolute right-0 top-full mt-2 w-32 bg-white border border-slate-200 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">{['date', 'name', 'size'].map(opt => <button key={opt} onClick={() => setSortBy(opt)} className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 first:rounded-t-xl last:rounded-b-xl capitalize">{opt}</button>)}</div>
               </div>
-              <div className="flex bg-slate-100 p-1 rounded-lg">
-                <button onClick={() => setViewMode('grid')} className={`p-2 rounded-md ${viewMode === 'grid' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}><Grid size={18} /></button>
-                <button onClick={() => setViewMode('list')} className={`p-2 rounded-md ${viewMode === 'list' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}><ListIcon size={18} /></button>
-              </div>
+              <div className="flex bg-slate-100 p-1 rounded-lg"><button onClick={() => setViewMode('grid')} className={`p-2 rounded-md ${viewMode === 'grid' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}><Grid size={18} /></button><button onClick={() => setViewMode('list')} className={`p-2 rounded-md ${viewMode === 'list' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}><ListIcon size={18} /></button></div>
             </div>
           </header>
 
@@ -337,27 +250,41 @@ const Dashboard = () => {
             ) : (
                 <div className={`grid ${viewMode === 'grid' ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-5' : 'grid-cols-1'} gap-6`}>
                   <AnimatePresence>
-                    {getSortedItems(content.folders).map((f) => <ItemCard key={f.id} item={f} type="folder" onAction={handleAction} onNavigate={(f) => { setCurrentFolder(f.id); setBreadcrumbs(prev => [...prev, {id:f.id, name:f.name}]); }} onMove={handleMoveItem} isTrashView={currentView === 'trash'} onContextMenu={handleContextMenu} />)}
-                    {getSortedItems(content.files).map((f) => <ItemCard key={f.id} item={f} type="file" onAction={handleAction} isTrashView={currentView === 'trash'} onContextMenu={handleContextMenu} />)}
+                    {getSortedItems(content.folders).map((f) => <ItemCard key={f.id} item={f} type="folder" onAction={handleAction} onNavigate={(f) => { setCurrentFolder(f.id); setBreadcrumbs(prev => [...prev, {id:f.id, name:f.name}]); }} onMove={handleMoveItem} isTrashView={currentView === 'trash'} onContextMenu={(e) => { e.preventDefault(); setMenuPos({ x: e.clientX, y: e.clientY, item: f, type: 'folder' }); }} />)}
+                    {getSortedItems(content.files).map((f) => <ItemCard key={f.id} item={f} type="file" onAction={handleAction} isTrashView={currentView === 'trash'} onContextMenu={(e) => { e.preventDefault(); setMenuPos({ x: e.clientX, y: e.clientY, item: f, type: 'file' }); }} />)}
                   </AnimatePresence>
                 </div>
             )}
           </div>
 
           {/* MODALS */}
-          {showCreateFolder && <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center"><div className="bg-white p-6 rounded-2xl shadow-xl w-80 animate-fade-in"><h3 className="font-bold text-lg mb-4">New Folder</h3><form onSubmit={createFolder}><input autoFocus type="text" placeholder="Name" className="w-full border border-slate-300 rounded-lg px-4 py-2 mb-4 focus:ring-2 focus:ring-indigo-500 outline-none" value={newFolderName} onChange={e => setNewFolderName(e.target.value)} /><div className="flex justify-end gap-2"><button type="button" onClick={() => setShowCreateFolder(false)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg">Cancel</button><button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Create</button></div></form></div></div>}
+          {showCreateFolder && <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center"><div className="bg-white p-6 rounded-2xl shadow-xl w-80 animate-fade-in"><h3 className="font-bold text-lg mb-4">New Folder</h3><form onSubmit={(e) => { e.preventDefault(); api.post('/drive/folders', { name: newFolderName, parentId: currentFolder }).then(() => { setNewFolderName(""); setShowCreateFolder(false); fetchContent(); }); }}><input autoFocus type="text" placeholder="Name" className="w-full border border-slate-300 rounded-lg px-4 py-2 mb-4 focus:ring-2 focus:ring-indigo-500 outline-none" value={newFolderName} onChange={e => setNewFolderName(e.target.value)} /><div className="flex justify-end gap-2"><button type="button" onClick={() => setShowCreateFolder(false)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg">Cancel</button><button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Create</button></div></form></div></div>}
+
+          {/* PREVIEW MODAL */}
+          {previewFile && (
+              <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-md flex flex-col animate-fade-in">
+                <div className="flex items-center justify-between px-6 py-4">
+                  <h3 className="text-white font-medium truncate max-w-2xl">{previewFile.name}</h3>
+                  <div className="flex gap-4"><button onClick={() => handleAction('download', previewFile)} className="text-slate-300 hover:text-white flex items-center gap-2 text-sm bg-white/10 px-3 py-1.5 rounded-full"><Download size={16} /> Download</button><button onClick={() => setPreviewFile(null)} className="text-slate-300 hover:text-white p-2 hover:bg-white/10 rounded-full"><X size={24} /></button></div>
+                </div>
+                <div className="flex-1 flex items-center justify-center p-4 overflow-hidden">
+                  {['jpg', 'jpeg', 'png', 'gif'].includes(previewFile.name.split('.').pop().toLowerCase()) && <img src={`http://localhost:8080/api/drive/view/${previewFile.name}?token=${localStorage.getItem('token')}`} alt="Preview" className="max-h-full max-w-full object-contain rounded-lg shadow-2xl" />}
+                  {['mp4', 'webm'].includes(previewFile.name.split('.').pop().toLowerCase()) && <video controls autoPlay className="max-h-full max-w-full rounded-lg shadow-2xl outline-none"><source src={`http://localhost:8080/api/drive/view/${previewFile.name}?token=${localStorage.getItem('token')}`} type="video/mp4" /></video>}
+                  {['pdf'].includes(previewFile.name.split('.').pop().toLowerCase()) && <iframe src={`http://localhost:8080/api/drive/view/${previewFile.name}?token=${localStorage.getItem('token')}`} className="w-full h-full max-w-5xl bg-white rounded-lg shadow-2xl" title="PDF" />}
+                </div>
+              </div>
+          )}
 
           {/* INFO MODAL */}
           {showInfoModal && (
               <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center">
                 <div className="bg-white p-6 rounded-2xl shadow-xl w-96 animate-fade-in">
-                  <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-slate-800">File Properties</h3><button onClick={() => setShowInfoModal(null)}><X size={20} className="text-slate-400 hover:text-slate-600" /></button></div>
+                  <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-slate-800">Properties</h3><button onClick={() => setShowInfoModal(null)}><X size={20} className="text-slate-400 hover:text-slate-600" /></button></div>
                   <div className="space-y-4">
                     <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl"><div className="p-3 bg-indigo-100 text-indigo-600 rounded-lg"><File size={24} /></div><div><p className="font-medium text-slate-700 break-all">{showInfoModal.name}</p><p className="text-xs text-slate-400 uppercase">{showInfoModal.type || 'File'}</p></div></div>
                     <div className="space-y-2 text-sm text-slate-600">
                       <div className="flex justify-between border-b border-slate-100 py-2"><span>Size</span><span className="font-medium">{formatBytes(showInfoModal.size || 0)}</span></div>
                       <div className="flex justify-between border-b border-slate-100 py-2"><span>Created</span><span className="font-medium">{new Date(showInfoModal.date).toLocaleDateString()}</span></div>
-                      <div className="flex justify-between py-2"><span>Location</span><span className="font-medium">{breadcrumbs[breadcrumbs.length-1].name}</span></div>
                     </div>
                   </div>
                 </div>
