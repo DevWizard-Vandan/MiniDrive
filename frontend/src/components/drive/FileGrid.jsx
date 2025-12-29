@@ -1,24 +1,24 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { UploadCloud } from 'lucide-react';
 import FileCard from './FileCard';
 
 const FileGrid = ({
-                      folders, files,
+                      items = [], // Default to empty array to prevent crashes
                       viewMode, sortBy,
                       onNavigate, onAction, onMove, onContextMenu,
                       isTrashView
                   }) => {
 
-    const getSortedItems = (items) => {
-        let sorted = [...items];
+    const getSortedItems = (list) => {
+        let sorted = [...list];
         if (sortBy === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name));
         else if (sortBy === 'size') sorted.sort((a, b) => (b.size || 0) - (a.size || 0));
         else sorted.sort((a, b) => new Date(b.date) - new Date(a.date));
         return sorted;
     };
 
-    if (folders.length === 0 && files.length === 0) {
+    if (items.length === 0) {
         return (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-60 pb-20">
                 <div className="w-32 h-32 bg-indigo-50 rounded-full flex items-center justify-center mb-6 animate-pulse">
@@ -39,18 +39,18 @@ const FileGrid = ({
         }
         `}>
             <AnimatePresence mode="popLayout">
-                {getSortedItems(folders).map((f) => (
+                {getSortedItems(items).map((item) => (
                     <FileCard
-                        key={f.id} item={f} type="folder"
-                        onNavigate={onNavigate} onAction={onAction} onMove={onMove}
-                        onContextMenu={onContextMenu} isTrashView={isTrashView}
-                    />
-                ))}
-                {getSortedItems(files).map((f) => (
-                    <FileCard
-                        key={f.id} item={f} type="file"
-                        onAction={onAction} onMove={onMove}
-                        onContextMenu={onContextMenu} isTrashView={isTrashView}
+                        key={item.id}
+                        item={item}
+                        // Determine type based on properties if not explicit
+                        type={item.type || (item.size ? 'file' : 'folder')}
+                        viewMode={viewMode}
+                        onNavigate={onNavigate}
+                        onAction={onAction}
+                        onMove={onMove}
+                        onContextMenu={onContextMenu}
+                        isTrashView={isTrashView}
                     />
                 ))}
             </AnimatePresence>

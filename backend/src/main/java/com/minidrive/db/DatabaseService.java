@@ -52,7 +52,7 @@ public class DatabaseService {
                 )
             """);
 
-			// 2. Folders (With Trash/Star columns)
+			// 2. Folders
 			stmt.execute("""
                 CREATE TABLE IF NOT EXISTS folders (
                     id UUID PRIMARY KEY,
@@ -65,7 +65,7 @@ public class DatabaseService {
                 )
             """);
 
-			// 3. Files (With Trash, Star, and Share Token)
+			// 3. Files
 			stmt.execute("""
                 CREATE TABLE IF NOT EXISTS files (
                     file_id UUID PRIMARY KEY,
@@ -75,7 +75,7 @@ public class DatabaseService {
                     folder_id UUID REFERENCES folders(id),
                     is_trashed BOOLEAN DEFAULT FALSE,
                     is_starred BOOLEAN DEFAULT FALSE,
-                    share_token VARCHAR(64) UNIQUE,  -- <--- THIS WAS MISSING
+                    share_token VARCHAR(64) UNIQUE,
                     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """);
@@ -98,7 +98,22 @@ public class DatabaseService {
                 )
             """);
 
-			System.out.println("DB: Schema initialized successfully (Users + Folders + Files + Chunks + Sharing)");
+			// --- SELF-HEALING: Force Add Columns if they are missing ---
+			// This ensures that if the table existed from an old version, it gets updated.
+			try {
+				stmt.execute("ALTER TABLE files ADD COLUMN IF NOT EXISTS is_trashed BOOLEAN DEFAULT FALSE");
+				stmt.execute("ALTER TABLE files ADD COLUMN IF NOT EXISTS is_starred BOOLEAN DEFAULT FALSE");
+				stmt.execute("ALTER TABLE files ADD COLUMN IF NOT EXISTS share_token VARCHAR(64) UNIQUE");
+
+				stmt.execute("ALTER TABLE folders ADD COLUMN IF NOT EXISTS is_trashed BOOLEAN DEFAULT FALSE");
+				stmt.execute("ALTER TABLE folders ADD COLUMN IF NOT EXISTS is_starred BOOLEAN DEFAULT FALSE");
+			} catch (SQLException e) {
+				// Ignore errors if columns exist (Postgres versions < 9.6 don't support IF NOT EXISTS on columns)
+				// But generally safe to ignore "duplicate column" errors here.
+				System.out.println("⚠️ Table schema update note: " + e.getMessage());
+			}
+
+			System.out.println("✅ DB: Schema initialized and patched successfully (Users + Folders + Files + Chunks + Sharing)");
 
 		} catch (SQLException e) {
 			e.printStackTrace();
@@ -111,7 +126,7 @@ public class DatabaseService {
 		try (Connection conn = dataSource.getConnection()) {
 			String userId = getUserId(conn, username);
 
-			// Case-insensitive search (ILIKE is Postgres specific, use LIKE LOWER for compatibility)
+			// Case-insensitive search
 			PreparedStatement ps = conn.prepareStatement(
 					"SELECT file_id, filename, size, uploaded_at, is_starred FROM files " +
 							"WHERE owner_id = ?::uuid AND LOWER(filename) LIKE LOWER(?)"
@@ -125,7 +140,7 @@ public class DatabaseService {
 						"id", rs.getString("file_id"),
 						"name", rs.getString("filename"),
 						"size", rs.getLong("size"),
-						"type", "file", // Search results don't show folders in this version
+						"type", "file",
 						"starred", rs.getBoolean("is_starred"),
 						"date", rs.getTimestamp("uploaded_at").toString()
 				));
@@ -156,7 +171,6 @@ public class DatabaseService {
 	}
 
 	// --- METADATA & UPLOAD METHODS ---
-
 	public void saveFileMetadata(String fileId, String fileName, long size, String username, String folderId) {
 		try (Connection conn = dataSource.getConnection()) {
 			String userId = getUserId(conn, username);
@@ -201,9 +215,7 @@ public class DatabaseService {
 			ps.setString(2, chunkHash);
 			ps.setInt(3, index);
 			ps.executeUpdate();
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
+		} catch (SQLException e) { e.printStackTrace(); }
 	}
 
 	public boolean hasChunk(String hash) {
@@ -212,13 +224,10 @@ public class DatabaseService {
 			ps.setString(1, hash);
 			ResultSet rs = ps.executeQuery();
 			return rs.next();
-		} catch (SQLException e) {
-			return false;
-		}
+		} catch (SQLException e) { return false; }
 	}
 
 	// --- FOLDER & CONTENT METHODS ---
-
 	public void createFolder(String folderName, String parentId, String username) {
 		try (Connection conn = dataSource.getConnection()) {
 			String userId = getUserId(conn, username);
@@ -229,27 +238,20 @@ public class DatabaseService {
 			);
 			ps.setObject(1, UUID.randomUUID());
 			ps.setString(2, folderName);
-
 			if (parentId != null && !parentId.isEmpty() && !parentId.equals("root")) {
 				ps.setObject(3, UUID.fromString(parentId));
 			} else {
 				ps.setObject(3, null);
 			}
-
 			ps.setObject(4, UUID.fromString(userId));
 			ps.executeUpdate();
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
+		} catch (SQLException e) { e.printStackTrace(); }
 	}
 
-	// Main method for Drive/Folder View
 	public Map<String, List<Map<String, Object>>> getFolderContents(String folderId, String username) {
-		// Reuse the filter method with default args
 		return getFilesByFilter(null, folderId, username);
 	}
 
-	// Powerful filter method for Trash, Recent, Starred, and Browsing
 	public Map<String, List<Map<String, Object>>> getFilesByFilter(String filter, String folderId, String username) {
 		Map<String, List<Map<String, Object>>> result = new HashMap<>();
 		List<Map<String, Object>> folders = new ArrayList<>();
@@ -271,23 +273,18 @@ public class DatabaseService {
 				folderWhere += "AND is_trashed = FALSE AND created_at > NOW() - INTERVAL '7 days'";
 				fileWhere += "AND is_trashed = FALSE AND uploaded_at > NOW() - INTERVAL '7 days'";
 			} else {
-				// Default Navigation
 				UUID parentUuid = (folderId != null && !folderId.isEmpty() && !folderId.equals("root"))
 						? UUID.fromString(folderId) : null;
-
 				folderWhere += "AND is_trashed = FALSE AND " + (parentUuid == null ? "parent_id IS NULL" : "parent_id = ?::uuid");
 				fileWhere += "AND is_trashed = FALSE AND " + (parentUuid == null ? "folder_id IS NULL" : "folder_id = ?::uuid");
 			}
 
-			// 1. Get Folders
+			// Get Folders
 			PreparedStatement psFolder = conn.prepareStatement("SELECT id, name, created_at, is_starred FROM folders WHERE " + folderWhere);
 			psFolder.setString(1, userId);
-
-			// Only set param 2 if browsing specific folder (not trash/recent)
 			if (filter == null && folderId != null && !folderId.equals("root")) {
 				psFolder.setObject(2, UUID.fromString(folderId));
 			}
-
 			ResultSet rsFolder = psFolder.executeQuery();
 			while (rsFolder.next()) {
 				folders.add(Map.of(
@@ -299,14 +296,12 @@ public class DatabaseService {
 				));
 			}
 
-			// 2. Get Files
+			// Get Files
 			PreparedStatement psFile = conn.prepareStatement("SELECT file_id, filename, size, uploaded_at, is_starred FROM files WHERE " + fileWhere);
 			psFile.setString(1, userId);
-
 			if (filter == null && folderId != null && !folderId.equals("root")) {
 				psFile.setObject(2, UUID.fromString(folderId));
 			}
-
 			ResultSet rsFile = psFile.executeQuery();
 			while (rsFile.next()) {
 				files.add(Map.of(
@@ -318,18 +313,14 @@ public class DatabaseService {
 						"date", rsFile.getTimestamp("uploaded_at").toString()
 				));
 			}
-
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
+		} catch (SQLException e) { e.printStackTrace(); }
 
 		result.put("folders", folders);
 		result.put("files", files);
 		return result;
 	}
 
-	// --- ACTIONS (Trash/Star/Delete) ---
-
+	// --- ACTIONS ---
 	public void toggleTrash(String id, boolean isFolder, boolean trash) {
 		String table = isFolder ? "folders" : "files";
 		String idCol = isFolder ? "id" : "file_id";
@@ -352,41 +343,63 @@ public class DatabaseService {
 		} catch (SQLException e) { e.printStackTrace(); }
 	}
 
+	// --- DELETE LOGIC ---
 	public boolean deleteFile(String filenameOrId, String username) {
 		try (Connection conn = dataSource.getConnection()) {
-			// First try to delete by ID
 			try {
 				UUID fileId = UUID.fromString(filenameOrId);
 				return deleteFileById(conn, fileId);
 			} catch (IllegalArgumentException e) {
-				// If not UUID, assume filename (legacy)
 				Map<String, Object> meta = getFileMetadata(filenameOrId, username);
 				if (meta != null) {
 					return deleteFileById(conn, UUID.fromString((String) meta.get("id")));
 				}
 			}
 			return false;
-		} catch (SQLException e) {
-			e.printStackTrace();
-			return false;
-		}
+		} catch (SQLException e) { return false; }
 	}
 
 	private boolean deleteFileById(Connection conn, UUID fileId) throws SQLException {
-		// 1. Delete Mappings
 		try (PreparedStatement ps = conn.prepareStatement("DELETE FROM file_chunks WHERE file_id = ?")) {
 			ps.setObject(1, fileId);
 			ps.executeUpdate();
 		}
-		// 2. Delete File Metadata
 		try (PreparedStatement ps = conn.prepareStatement("DELETE FROM files WHERE file_id = ?")) {
 			ps.setObject(1, fileId);
 			return ps.executeUpdate() > 0;
 		}
 	}
 
-	// --- HELPERS ---
+	public void deleteEntityById(String id, String username) {
+		try (Connection conn = dataSource.getConnection()) {
+			String userId = getUserId(conn, username);
+			if (userId == null) return;
 
+			// Delete File (and chunks)
+			PreparedStatement psChunks = conn.prepareStatement(
+					"DELETE FROM file_chunks WHERE file_id = ? AND EXISTS (SELECT 1 FROM files WHERE file_id = ? AND owner_id = ?::uuid)"
+			);
+			psChunks.setObject(1, UUID.fromString(id));
+			psChunks.setObject(2, UUID.fromString(id));
+			psChunks.setString(3, userId);
+			psChunks.executeUpdate();
+
+			PreparedStatement psFile = conn.prepareStatement("DELETE FROM files WHERE file_id = ? AND owner_id = ?::uuid");
+			psFile.setObject(1, UUID.fromString(id));
+			psFile.setString(2, userId);
+			int rows = psFile.executeUpdate();
+
+			// If not a file, try Folder
+			if (rows == 0) {
+				PreparedStatement psFolder = conn.prepareStatement("DELETE FROM folders WHERE id = ? AND owner_id = ?::uuid");
+				psFolder.setObject(1, UUID.fromString(id));
+				psFolder.setString(2, userId);
+				psFolder.executeUpdate();
+			}
+		} catch (SQLException e) { e.printStackTrace(); }
+	}
+
+	// --- HELPERS ---
 	private String getUserId(Connection conn, String username) throws SQLException {
 		PreparedStatement ps = conn.prepareStatement("SELECT id FROM users WHERE username = ?");
 		ps.setString(1, username);
@@ -407,60 +420,19 @@ public class DatabaseService {
 		return chunks;
 	}
 
-	// --- PERMANENT DELETE ---
-	public void deleteEntityById(String id, String username) {
-		try (Connection conn = dataSource.getConnection()) {
-			String userId = getUserId(conn, username);
-			if (userId == null) return;
-
-			// 1. Try deleting from files first
-			// We delete chunks first to satisfy foreign keys
-			PreparedStatement psChunks = conn.prepareStatement(
-					"DELETE FROM file_chunks WHERE file_id = ? AND EXISTS (SELECT 1 FROM files WHERE file_id = ? AND owner_id = ?::uuid)"
-			);
-			psChunks.setObject(1, UUID.fromString(id));
-			psChunks.setObject(2, UUID.fromString(id));
-			psChunks.setString(3, userId);
-			psChunks.executeUpdate();
-
-			PreparedStatement psFile = conn.prepareStatement(
-					"DELETE FROM files WHERE file_id = ? AND owner_id = ?::uuid"
-			);
-			psFile.setObject(1, UUID.fromString(id));
-			psFile.setString(2, userId);
-			int rows = psFile.executeUpdate();
-
-			// 2. If no file deleted, try deleting folder
-			if (rows == 0) {
-				PreparedStatement psFolder = conn.prepareStatement(
-						"DELETE FROM folders WHERE id = ? AND owner_id = ?::uuid"
-				);
-				psFolder.setObject(1, UUID.fromString(id));
-				psFolder.setString(2, userId);
-				psFolder.executeUpdate();
-			}
-
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
-	}
-
-	// --- MOVE LOGIC ---
+	// --- MOVE ---
 	public void moveEntity(String id, boolean isFolder, String targetFolderId, String username) {
 		try (Connection conn = dataSource.getConnection()) {
 			String userId = getUserId(conn, username);
 			if (userId == null) return;
 
-			// Determine table and columns
 			String table = isFolder ? "folders" : "files";
 			String idCol = isFolder ? "id" : "file_id";
 			String parentCol = isFolder ? "parent_id" : "folder_id";
 
-			// Validate Target Folder (unless moving to root)
 			Object targetUuid = null;
 			if (targetFolderId != null && !targetFolderId.equals("root")) {
 				targetUuid = UUID.fromString(targetFolderId);
-				// Optional: Check if target folder exists and belongs to user here
 			}
 
 			PreparedStatement ps = conn.prepareStatement(
@@ -470,17 +442,12 @@ public class DatabaseService {
 			ps.setObject(2, UUID.fromString(id));
 			ps.setString(3, userId);
 			ps.executeUpdate();
-
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
+		} catch (SQLException e) { e.printStackTrace(); }
 	}
 
-	// --- SHARING ---
-
-	// 1. Generate a Share Token
+	// --- SHARE ---
 	public String createShareLink(String fileId, String username) {
-		String token = UUID.randomUUID().toString().substring(0, 8); // Short random ID
+		String token = UUID.randomUUID().toString().substring(0, 8);
 		try (Connection conn = dataSource.getConnection()) {
 			PreparedStatement ps = conn.prepareStatement(
 					"UPDATE files SET share_token = ? WHERE file_id = ? AND owner_id = (SELECT id FROM users WHERE username = ?)"
@@ -496,7 +463,6 @@ public class DatabaseService {
 		}
 	}
 
-	// 2. Find File by Share Token (No username needed!)
 	public Map<String, Object> getFileByShareToken(String token) {
 		try (Connection conn = dataSource.getConnection()) {
 			PreparedStatement ps = conn.prepareStatement(

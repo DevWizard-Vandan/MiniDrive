@@ -1,15 +1,17 @@
 import React from 'react';
 import { Search, ChevronDown, Grid, List as ListIcon } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 const Header = ({
                     searchQuery, setSearchQuery,
                     sortBy, setSortBy,
-                    viewMode, setViewMode,
-                    user, onProfileClick
+                    viewMode, setViewMode
                 }) => {
+
+    const { logout, getAvatar } = useAuth();
+
     return (
         <header className="h-20 px-8 flex items-center justify-between z-20 relative">
-            {/* Search Bar */}
             <div className="flex-1 max-w-2xl mr-8">
                 <div className="relative group">
                     <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
@@ -24,7 +26,6 @@ const Header = ({
             </div>
 
             <div className="flex items-center gap-4">
-                {/* Sort Dropdown */}
                 <div className="relative group z-30">
                     <button className="flex items-center gap-2 px-4 py-2 bg-white/50 backdrop-blur rounded-xl text-sm font-semibold text-slate-600 hover:bg-white/80 transition-all border border-white/20">
                         Sort: <span className="text-indigo-600 capitalize">{sortBy}</span> <ChevronDown size={16} />
@@ -38,7 +39,6 @@ const Header = ({
                     </div>
                 </div>
 
-                {/* View Toggles */}
                 <div className="bg-white/50 backdrop-blur rounded-xl p-1 flex border border-white/20">
                     <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}>
                         <Grid size={18} />
@@ -48,9 +48,11 @@ const Header = ({
                     </button>
                 </div>
 
-                {/* Profile */}
-                <button onClick={onProfileClick} className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/30 hover:scale-105 transition-transform">
-                    {user?.charAt(0).toUpperCase() || 'U'}
+                <button
+                    onClick={logout}
+                    className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/30 hover:scale-105 transition-transform"
+                >
+                    {getAvatar()}
                 </button>
             </div>
         </header>

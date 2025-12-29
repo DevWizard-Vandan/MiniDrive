@@ -4,9 +4,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import api from './api';
 
-// Hooks & Utils
-import useDriveContent from './hooks/useDriveContent';
-import { calculateHash } from './utils/helpers';
+// Hooks & Context
+import { useDriveContent } from './hooks/useDriveContent';
+import { useAuth } from './context/AuthContext';
 
 // Components
 import Sidebar from './components/sidebar/Sidebar';
@@ -23,151 +23,86 @@ import PreviewModal from './components/modals/PreviewModal';
 import InfoModal from './components/modals/InfoModal';
 
 const Dashboard = () => {
-  // --- State Management ---
-  const [currentView, setCurrentView] = useState('drive');
-  const [currentFolder, setCurrentFolder] = useState(null);
-  const [breadcrumbs, setBreadcrumbs] = useState([{ id: null, name: 'My Drive' }]);
+  // 1. Logic Hook
+  const {
+    content, stats, progress,
+    currentView, setCurrentView,
+    currentFolder, setCurrentFolder,
+    breadcrumbs, setBreadcrumbs,
+    fetchContent, handleUpload, handleCreateFolder, handleMoveItem, deleteItem
+  } = useDriveContent();
+
+  // 2. Auth Context
+  const { user } = useAuth();
+
+  // 3. Local UI State
+  const [menuPos, setMenuPos] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [activeModal, setActiveModal] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
+
+  // Header State
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState("grid");
   const [sortBy, setSortBy] = useState("date");
 
-  // UI Interactions
-  const [menuPos, setMenuPos] = useState(null);
-  const [progress, setProgress] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-
-  // Modals
-  const [activeModal, setActiveModal] = useState(null); // 'createFolder', 'preview', 'info', 'profile'
-  const [selectedItem, setSelectedItem] = useState(null);
-
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
-  const user = localStorage.getItem('user');
 
-  // Custom Hook for Data
-  const { content, stats, refresh, refreshStats } = useDriveContent(currentView, currentFolder, searchQuery);
-
-  // --- Global Click Listener (Close Context Menu) ---
+  // Close Context Menu on Global Click
   useEffect(() => {
     const handleClick = () => setMenuPos(null);
     window.addEventListener('click', handleClick);
     return () => window.removeEventListener('click', handleClick);
   }, []);
 
-  // --- Action Handlers ---
+  // Search Logic
+  useEffect(() => {
+    fetchContent(searchQuery);
+  }, [searchQuery, fetchContent]);
+
   const handleAction = async (action, item) => {
     setMenuPos(null);
-    try {
-      switch(action) {
-        case 'open':
-          if (item.type === 'folder' || !item.size) { // Folder check
-            setCurrentFolder(item.id);
-            setBreadcrumbs(prev => [...prev, { id: item.id, name: item.name }]);
-          } else {
-            setSelectedItem(item);
-            setActiveModal('preview');
-          }
-          break;
-        case 'preview':
-          setSelectedItem(item);
-          setActiveModal('preview');
-          break;
-        case 'info':
-          setSelectedItem(item);
-          setActiveModal('info');
-          break;
-        case 'download':
-          const res = await api.get(`/drive/download/${item.name}`, { responseType: 'blob' });
-          const url = window.URL.createObjectURL(new Blob([res.data]));
-          const link = document.createElement('a'); link.href = url; link.download = item.name;
-          document.body.appendChild(link); link.click(); link.remove();
-          break;
-        case 'share':
-          const shareRes = await api.post(`/drive/share/${item.id}`);
-          navigator.clipboard.writeText(`http://localhost:8080/api/public/share/${shareRes.data}`);
-          toast.success("Public link copied!");
-          break;
-        case 'star':
-          await api.post('/drive/action/star', { id: item.id, type: item.type || 'file', value: !item.starred });
-          refresh();
-          break;
-        case 'trash':
-        case 'restore':
-          await api.post('/drive/action/trash', { id: item.id, type: item.type || 'file', value: action === 'trash' });
-          toast.success(action === 'trash' ? "Moved to Trash" : "Restored");
-          refresh();
-          break;
-        case 'permanentDelete':
-          if (window.confirm("Delete forever? This cannot be undone.")) {
-            await api.delete(`/drive/${item.id}/permanent`);
-            toast.success("Deleted permanently");
-            refresh();
-            refreshStats();
-          }
-          break;
-        default: break;
+    if(action === 'open') {
+      if(item.type === 'folder') {
+        setCurrentFolder(item.id);
+        setBreadcrumbs(prev => [...prev, { id: item.id, name: item.name }]);
+      } else {
+        setSelectedItem(item); setActiveModal('preview');
       }
-    } catch (err) {
-      console.error(err);
-      toast.error("Action failed");
+    }
+    else if(action === 'preview') { setSelectedItem(item); setActiveModal('preview'); }
+    else if(action === 'info') { setSelectedItem(item); setActiveModal('info'); }
+    else if(action === 'download') {
+      const res = await api.get(`/drive/download/${item.name}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a'); link.href = url; link.download = item.name;
+      document.body.appendChild(link); link.click(); link.remove();
+    }
+    else if(action === 'share') {
+      const res = await api.post(`/drive/share/${item.id}`);
+      navigator.clipboard.writeText(`http://localhost:8080/api/public/share/${res.data}`);
+      toast.success("Public link copied!");
+    }
+    else if(action === 'star') {
+      await api.post('/drive/action/star', { id: item.id, type: item.type || 'file', value: !item.starred });
+      fetchContent();
+    }
+    else if(action === 'trash' || action === 'restore') {
+      deleteItem(item.id, false);
+    }
+    else if(action === 'permanentDelete') {
+      if(window.confirm("Delete forever?")) deleteItem(item.id, true);
     }
   };
 
-  const handleCreateFolder = async (name) => {
-    try {
-      await api.post('/drive/folders', { name, parentId: currentFolder });
-      setActiveModal(null);
-      refresh();
-    } catch (err) { toast.error("Failed to create folder"); }
-  };
-
-  const handleUpload = async (file) => {
-    setProgress(1);
-    const CHUNK_SIZE = 1024 * 1024;
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-    try {
-      const formData = new FormData();
-      formData.append('filename', file.name);
-      formData.append('size', file.size);
-      if (currentFolder) formData.append('folderId', currentFolder);
-
-      const initRes = await api.post('/drive/init', formData);
-      const uploadId = initRes.data;
-
-      for (let i = 0; i < totalChunks; i++) {
-        const chunk = file.slice(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, file.size));
-        const chunkData = new FormData();
-        chunkData.append('uploadId', uploadId);
-        chunkData.append('index', i);
-        chunkData.append('hash', await calculateHash(chunk));
-        chunkData.append('chunk', chunk);
-
-        await api.post('/drive/upload/chunk', chunkData);
-        setProgress(Math.round(((i + 1) / totalChunks) * 100));
-      }
-      await api.post(`/drive/complete?uploadId=${uploadId}`);
-      refresh(); refreshStats();
-      setTimeout(() => setProgress(0), 1000);
-      toast.success("Uploaded successfully");
-    } catch (error) {
-      toast.error("Upload Failed");
-      setProgress(0);
-    }
-  };
-
-  // --- Render ---
   return (
       <div className="flex h-screen bg-slate-100 font-sans text-slate-800 overflow-hidden relative selection:bg-indigo-500/30">
         <AnimatedBackground />
+        <input type="file" ref={fileInputRef} onChange={(e) => handleUpload(e.target.files)} className="hidden" multiple />
 
-        <input type="file" ref={fileInputRef} onChange={(e) => Array.from(e.target.files).forEach(handleUpload)} className="hidden" multiple />
-
-        {/* Context Menu */}
         <AnimatePresence>
-          {menuPos && (
-              <ContextMenu {...menuPos} onClose={() => setMenuPos(null)} onAction={handleAction} isTrashView={currentView === 'trash'} />
-          )}
+          {menuPos && <ContextMenu {...menuPos} onClose={() => setMenuPos(null)} onAction={handleAction} isTrashView={currentView === 'trash'} />}
         </AnimatePresence>
 
         <Sidebar
@@ -177,14 +112,12 @@ const Dashboard = () => {
             onCreateFolder={() => setActiveModal('createFolder')}
         />
 
-        {/* Main Content Area */}
         <main
             className="flex-1 flex flex-col relative z-10 m-4 rounded-3xl bg-white/40 border border-white/20 shadow-xl backdrop-blur-sm overflow-hidden"
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
-            onDrop={(e) => { e.preventDefault(); setIsDragging(false); Array.from(e.dataTransfer.files).forEach(handleUpload); }}
+            onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleUpload(e.dataTransfer.files); }}
         >
-          {/* Drag Overlay */}
           <AnimatePresence>
             {isDragging && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 bg-indigo-500/10 backdrop-blur-sm border-4 border-dashed border-indigo-500 rounded-3xl flex items-center justify-center pointer-events-none">
@@ -199,7 +132,6 @@ const Dashboard = () => {
               searchQuery={searchQuery} setSearchQuery={setSearchQuery}
               sortBy={sortBy} setSortBy={setSortBy}
               viewMode={viewMode} setViewMode={setViewMode}
-              user={user} onProfileClick={() => { localStorage.clear(); navigate('/login'); }}
           />
 
           {currentView === 'drive' && !searchQuery && (
@@ -214,14 +146,12 @@ const Dashboard = () => {
           )}
 
           <FileGrid
-              folders={content.folders} files={content.files}
-              viewMode={viewMode} sortBy={sortBy}
+              items={[...(content.folders || []), ...(content.files || [])]}
+              viewMode={viewMode}
+              sortBy={sortBy}
               onNavigate={(item) => handleAction('open', item)}
               onAction={handleAction}
-              onMove={async (itemId, type, targetId) => {
-                await api.post('/drive/action/move', { id: itemId, type, targetId });
-                refresh(); toast.success("Moved");
-              }}
+              onMove={handleMoveItem}
               onContextMenu={(e, item, type) => setMenuPos({ x: e.clientX, y: e.clientY, item, type })}
               isTrashView={currentView === 'trash'}
           />
@@ -229,10 +159,9 @@ const Dashboard = () => {
 
         <UploadProgress progress={progress} />
 
-        {/* Modals */}
-        <CreateFolderModal isOpen={activeModal === 'createFolder'} onClose={() => setActiveModal(null)} onCreate={handleCreateFolder} />
+        <CreateFolderModal isOpen={activeModal === 'createFolder'} onClose={() => setActiveModal(null)} onCreate={(name) => { handleCreateFolder(name); setActiveModal(null); }} />
         <PreviewModal file={activeModal === 'preview' ? selectedItem : null} onClose={() => setActiveModal(null)} onDownload={(f) => handleAction('download', f)} />
-        <InfoModal file={activeModal === 'info' ? selectedItem : null} onClose={() => setActiveModal(null)} />
+        <InfoModal file={activeModal === 'info' ? selectedItem : null} onClose={() => setActiveModal(null)} breadcrumbs={breadcrumbs} />
       </div>
   );
 };

@@ -1,27 +1,43 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast'; // Import Toaster
+import { Routes, Route, Navigate } from 'react-router-dom'; // Remove BrowserRouter import
+import { Toaster } from 'react-hot-toast';
+import Dashboard from './Dashboard';
 import Login from './Login';
 import Register from './Register';
-import Dashboard from './Dashboard';
+import AuthLayout from './AuthLayout';
+import { AuthProvider, useAuth } from './context/AuthContext';
 
+// Protected Route Wrapper
 const ProtectedRoute = ({ children }) => {
-    const token = localStorage.getItem('token');
-    return token ? children : <Navigate to="/login" />;
+    const { user } = useAuth();
+    return user ? children : <Navigate to="/login" />;
 };
 
 function App() {
     return (
-        <Router>
-            {/* Global Notification Container */}
-            <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
-
+        // REMOVED <BrowserRouter> HERE
+        <AuthProvider>
+            <Toaster position="bottom-right" />
             <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                <Route path="/login" element={
+                    <AuthLayout title="Welcome Back" subtitle="Access your secure cloud storage">
+                        <Login />
+                    </AuthLayout>
+                } />
+                <Route path="/register" element={
+                    <AuthLayout title="Create Account" subtitle="Get 1TB free for your first file">
+                        <Register />
+                    </AuthLayout>
+                } />
+                <Route path="/dashboard" element={
+                    <ProtectedRoute>
+                        <Dashboard />
+                    </ProtectedRoute>
+                } />
+                <Route path="/" element={<Navigate to="/dashboard" />} />
             </Routes>
-        </Router>
+        </AuthProvider>
+        // REMOVED </BrowserRouter> HERE
     );
 }
 
