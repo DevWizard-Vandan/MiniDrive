@@ -51,3 +51,10 @@ CREATE TABLE global_chunks (
 
 -- 7. HOTFIX: Add Share Token
 ALTER TABLE files ADD COLUMN IF NOT EXISTS share_token VARCHAR(64) UNIQUE;
+
+ALTER TABLE files
+DROP CONSTRAINT files_folder_id_fkey,
+ADD CONSTRAINT files_folder_id_fkey
+    FOREIGN KEY (folder_id)
+    REFERENCES folders(id)
+    ON DELETE CASCADE;

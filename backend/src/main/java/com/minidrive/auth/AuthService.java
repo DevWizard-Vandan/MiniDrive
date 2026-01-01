@@ -84,4 +84,23 @@ public class AuthService {
 			return null; // Invalid token
 		}
 	}
+
+	/**
+	 * Verify user's password for dangerous actions (e.g., account deletion).
+	 */
+	public boolean verifyPassword(String username, String password) {
+		try (Connection conn = db.getDataSource().getConnection()) {
+			PreparedStatement ps = conn.prepareStatement("SELECT password FROM users WHERE username = ?");
+			ps.setString(1, username);
+			ResultSet rs = ps.executeQuery();
+
+			if (rs.next()) {
+				String hashed = rs.getString("password");
+				return encoder.matches(password, hashed);
+			}
+			return false;
+		} catch (SQLException e) {
+			return false;
+		}
+	}
 }

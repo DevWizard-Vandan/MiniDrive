@@ -1,168 +1,419 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
-import toast from 'react-hot-toast';
-import api from './api';
-
-// Hooks & Context
+import React, { useState, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { useDriveContent } from './hooks/useDriveContent';
-import { useAuth } from './context/AuthContext';
-
-// Components
+import { useKeyboardShortcuts, createDriveShortcuts } from './hooks/useKeyboardShortcuts';
 import Sidebar from './components/sidebar/Sidebar';
-import Header from './components/ui/Header';
-import AnimatedBackground from './components/ui/AnimatedBackground';
-import UploadProgress from './components/ui/UploadProgress';
-import Breadcrumbs from './components/drive/Breadcrumbs';
+import Navbar from './components/navbar/Navbar';
 import FileGrid from './components/drive/FileGrid';
 import ContextMenu from './components/drive/ContextMenu';
-
-// Modals
-import CreateFolderModal from './components/modals/CreateFolderModal';
+import ActivityLog from './components/drive/ActivityLog';
+import ShareModal from './components/modals/ShareModal';
+import SettingsModal from './components/modals/SettingsModal';
+import ProfileModal from './components/modals/ProfileModal';
 import PreviewModal from './components/modals/PreviewModal';
-import InfoModal from './components/modals/InfoModal';
+import toast from 'react-hot-toast';
+import api from './api';
+import { Home, ChevronRight, LayoutGrid, List, Upload } from 'lucide-react';
+
+const pageVariants = {
+  initial: { opacity: 0, y: 20 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -20 }
+};
 
 const Dashboard = () => {
-  // 1. Logic Hook
   const {
-    content, stats, progress,
-    currentView, setCurrentView,
-    currentFolder, setCurrentFolder,
-    breadcrumbs, setBreadcrumbs,
-    fetchContent, handleUpload, handleCreateFolder, handleMoveItem, deleteItem
+    content,
+    stats,
+    progress,
+    currentView,
+    setCurrentView,
+    currentFolder,
+    setCurrentFolder,
+    breadcrumbs,
+    setBreadcrumbs,
+    fetchContent,
+    handleUpload,
+    handleCreateFolder,
+    deleteItem,
+    restoreItem,
+    toggleStar
   } = useDriveContent();
 
-  // 2. Auth Context
-  const { user } = useAuth();
-
-  // 3. Local UI State
-  const [menuPos, setMenuPos] = useState(null);
+  const [menu, setMenu] = useState(null);
+  const [viewMode, setViewMode] = useState('grid');
+  const [sortBy, setSortBy] = useState('date');
   const [isDragging, setIsDragging] = useState(false);
-  const [activeModal, setActiveModal] = useState(null);
-  const [selectedItem, setSelectedItem] = useState(null);
-
-  // Header State
-  const [searchQuery, setSearchQuery] = useState("");
-  const [viewMode, setViewMode] = useState("grid");
-  const [sortBy, setSortBy] = useState("date");
-
   const fileInputRef = useRef(null);
-  const navigate = useNavigate();
 
-  // Close Context Menu on Global Click
-  useEffect(() => {
-    const handleClick = () => setMenuPos(null);
-    window.addEventListener('click', handleClick);
-    return () => window.removeEventListener('click', handleClick);
-  }, []);
+  // Modal States
+  const [shareModalItem, setShareModalItem] = useState(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null); // NEW: Preview state
 
-  // Search Logic
-  useEffect(() => {
-    fetchContent(searchQuery);
-  }, [searchQuery, fetchContent]);
+  // Keyboard Shortcuts
+  useKeyboardShortcuts(createDriveShortcuts({
+    onUpload: () => fileInputRef.current?.click(),
+    onDelete: () => { /* TODO */ },
+    onDownload: () => { /* TODO */ },
+    onNewFolder: () => {
+      const name = prompt("Enter folder name:");
+      if (name) handleCreateFolder(name);
+    },
+    onSearch: () => document.querySelector('input[type="text"]')?.focus(),
+    onEscape: () => {
+      setShareModalItem(null);
+      setIsSettingsOpen(false);
+      setIsProfileOpen(false);
+      setPreviewFile(null);
+      setMenu(null);
+    },
+    onSelectAll: () => { /* TODO */ }
+  }));
 
-  const handleAction = async (action, item) => {
-    setMenuPos(null);
-    if(action === 'open') {
-      if(item.type === 'folder') {
-        setCurrentFolder(item.id);
-        setBreadcrumbs(prev => [...prev, { id: item.id, name: item.name }]);
-      } else {
-        setSelectedItem(item); setActiveModal('preview');
-      }
-    }
-    else if(action === 'preview') { setSelectedItem(item); setActiveModal('preview'); }
-    else if(action === 'info') { setSelectedItem(item); setActiveModal('info'); }
-    else if(action === 'download') {
-      const res = await api.get(`/drive/download/${item.name}`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const link = document.createElement('a'); link.href = url; link.download = item.name;
-      document.body.appendChild(link); link.click(); link.remove();
-    }
-    else if(action === 'share') {
-      const res = await api.post(`/drive/share/${item.id}`);
-      navigator.clipboard.writeText(`http://localhost:8080/api/public/share/${res.data}`);
-      toast.success("Public link copied!");
-    }
-    else if(action === 'star') {
-      await api.post('/drive/action/star', { id: item.id, type: item.type || 'file', value: !item.starred });
-      fetchContent();
-    }
-    else if(action === 'trash' || action === 'restore') {
-      deleteItem(item.id, false);
-    }
-    else if(action === 'permanentDelete') {
-      if(window.confirm("Delete forever?")) deleteItem(item.id, true);
+  // --- FILE UPLOAD HANDLERS ---
+  const handleFileSelect = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e) => {
+    if (e.target.files?.length > 0) {
+      handleUpload(e.target.files);
+      e.target.value = '';
     }
   };
 
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files?.length > 0) {
+      handleUpload(files);
+    }
+  };
+
+  // --- DOWNLOAD HELPER ---
+  const handleDownload = async (item) => {
+    if (item.type === 'folder') {
+      const toastId = toast.loading("Zipping folder...");
+      try {
+        const res = await api.get(`/drive/download/folder/${item.id}`, { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${item.name}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        toast.success("Download started", { id: toastId });
+      } catch (err) {
+        toast.error("Download failed or folder empty", { id: toastId });
+      }
+    } else {
+      try {
+        const res = await api.get(`/drive/download/${item.name}`, { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = item.name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } catch (e) { toast.error("Download failed"); }
+    }
+  };
+
+  // --- ACTIONS HANDLER ---
+  const handleAction = async (action, item) => {
+    switch (action) {
+      case 'open':
+        if (item.type === 'folder') {
+          setCurrentFolder(item.id);
+          setBreadcrumbs([...breadcrumbs, { id: item.id, name: item.name }]);
+        }
+        break;
+
+      case 'preview':
+        // Open preview modal for files
+        setPreviewFile({ ...item, type: 'file' });
+        break;
+
+      case 'download':
+        await handleDownload(item);
+        break;
+
+      case 'trash':
+        await deleteItem(item, false);
+        break;
+
+      case 'permanentDelete':
+        await deleteItem(item, true);
+        break;
+
+      case 'restore':
+        await restoreItem(item);
+        break;
+
+      case 'star':
+        await toggleStar(item);
+        break;
+
+      case 'share':
+        setShareModalItem(item);
+        break;
+
+      case 'info':
+        if (item.type === 'folder') {
+          toast(`Folder: ${item.name}`, { icon: 'ℹ️' });
+        } else {
+          toast(`Size: ${(item.size / 1024 / 1024).toFixed(2)} MB`, { icon: 'ℹ️' });
+        }
+        break;
+
+      default:
+        break;
+    }
+    setMenu(null);
+  };
+
+  // --- NAVIGATION + PREVIEW ---
+  const handleItemDoubleClick = (item, type) => {
+    if (type === 'folder') {
+      // Navigate into folder
+      setCurrentFolder(item.id);
+      setBreadcrumbs([...breadcrumbs, { id: item.id, name: item.name }]);
+    } else {
+      // Open file preview
+      setPreviewFile({ ...item, type: 'file' });
+    }
+  };
+
+  // --- BREADCRUMB NAVIGATION ---
+  const handleNavigate = (folderId, index) => {
+    setCurrentFolder(folderId);
+    setBreadcrumbs(breadcrumbs.slice(0, index + 1));
+  };
+
   return (
-      <div className="flex h-screen bg-slate-100 font-sans text-slate-800 overflow-hidden relative selection:bg-indigo-500/30">
-        <AnimatedBackground />
-        <input type="file" ref={fileInputRef} onChange={(e) => handleUpload(e.target.files)} className="hidden" multiple />
+    <motion.div
+      variants={pageVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      transition={{ duration: 0.3 }}
+      className="flex h-screen bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans overflow-hidden selection:bg-indigo-100 dark:selection:bg-indigo-900 transition-colors duration-300"
+    >
 
-        <AnimatePresence>
-          {menuPos && <ContextMenu {...menuPos} onClose={() => setMenuPos(null)} onAction={handleAction} isTrashView={currentView === 'trash'} />}
-        </AnimatePresence>
+      {/* Hidden File Input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+        multiple
+      />
 
-        <Sidebar
-            currentView={currentView} setCurrentView={setCurrentView}
-            setCurrentFolder={setCurrentFolder} setBreadcrumbs={setBreadcrumbs}
-            stats={stats} onUpload={() => fileInputRef.current.click()}
-            onCreateFolder={() => setActiveModal('createFolder')}
+      {/* 1. Sidebar */}
+      <Sidebar
+        currentView={currentView}
+        setCurrentView={(view) => {
+          setCurrentView(view);
+          if (view === 'drive') {
+            setCurrentFolder(null);
+            setBreadcrumbs([{ id: null, name: 'My Drive' }]);
+          }
+        }}
+        stats={stats}
+        progress={progress}
+        setCurrentFolder={setCurrentFolder}
+        setBreadcrumbs={setBreadcrumbs}
+        onUpload={handleFileSelect}
+        onCreateFolder={() => {
+          const name = prompt("Enter folder name:");
+          if (name) handleCreateFolder(name);
+        }}
+      />
+
+      {/* 2. Main Content Area */}
+      <main className="flex-1 flex flex-col relative min-w-0 bg-white dark:bg-slate-900 m-2 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden transition-colors duration-300">
+
+        {/* Navbar */}
+        <Navbar
+          onSearch={(q) => fetchContent(q)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenProfile={() => setIsProfileOpen(true)}
         />
 
-        <main
-            className="flex-1 flex flex-col relative z-10 m-4 rounded-3xl bg-white/40 border border-white/20 shadow-xl backdrop-blur-sm overflow-hidden"
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleUpload(e.dataTransfer.files); }}
-        >
-          <AnimatePresence>
-            {isDragging && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 bg-indigo-500/10 backdrop-blur-sm border-4 border-dashed border-indigo-500 rounded-3xl flex items-center justify-center pointer-events-none">
-                  <div className="bg-white p-6 rounded-2xl shadow-xl flex flex-col items-center animate-bounce">
-                    <p className="font-bold text-lg text-indigo-700">Drop files to upload</p>
+        {/* 3. Dynamic Content */}
+        {currentView === 'activity' ? (
+          <div className="flex-1 overflow-y-auto">
+            <ActivityLog />
+          </div>
+        ) : (
+          <>
+            {/* Toolbar */}
+            <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10 transition-colors">
+
+              {/* Breadcrumbs */}
+              <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                {breadcrumbs.map((crumb, i) => (
+                  <div key={crumb.id || 'root'} className="flex items-center gap-1">
+                    {i > 0 && <ChevronRight size={14} className="text-slate-300 dark:text-slate-600" />}
+                    <button
+                      onClick={() => handleNavigate(crumb.id, i)}
+                      className={`hover:bg-slate-100 dark:hover:bg-slate-800 px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 ${i === breadcrumbs.length - 1 ? 'text-indigo-600 dark:text-indigo-400 font-semibold bg-indigo-50 dark:bg-indigo-900/30' : 'hover:text-slate-900 dark:hover:text-white'}`}
+                    >
+                      {i === 0 && <Home size={14} />}
+                      {crumb.name}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* View Controls */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="px-3 py-1.5 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900 cursor-pointer transition-colors"
+                >
+                  <option value="date">Sort by Date</option>
+                  <option value="name">Sort by Name</option>
+                  <option value="size">Sort by Size</option>
+                </select>
+
+                <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-white dark:bg-slate-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                  >
+                    <LayoutGrid size={18} />
+                  </button>
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                  >
+                    <List size={18} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* File Grid with Drag & Drop */}
+            <div
+              className={`flex-1 overflow-y-auto scroll-smooth relative transition-colors ${isDragging ? 'bg-indigo-50/50 dark:bg-indigo-900/20' : ''}`}
+              onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
+              onClick={() => setMenu(null)}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {/* Drag Overlay */}
+              {isDragging && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="absolute inset-0 bg-indigo-500/10 dark:bg-indigo-500/20 border-2 border-dashed border-indigo-400 dark:border-indigo-500 rounded-xl m-4 z-30 flex items-center justify-center pointer-events-none"
+                >
+                  <div className="text-center">
+                    <motion.div
+                      animate={{ y: [0, -10, 0] }}
+                      transition={{ repeat: Infinity, duration: 1.5 }}
+                    >
+                      <Upload size={48} className="mx-auto text-indigo-500 mb-2" />
+                    </motion.div>
+                    <p className="text-indigo-600 dark:text-indigo-400 font-semibold">Drop files here to upload</p>
                   </div>
                 </motion.div>
-            )}
-          </AnimatePresence>
+              )}
 
-          <Header
-              searchQuery={searchQuery} setSearchQuery={setSearchQuery}
-              sortBy={sortBy} setSortBy={setSortBy}
-              viewMode={viewMode} setViewMode={setViewMode}
-          />
+              {/* Upload Progress Bar */}
+              {progress > 0 && progress < 100 && (
+                <div className="mx-6 mt-4">
+                  <div className="bg-slate-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                    <motion.div
+                      className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progress}%` }}
+                      transition={{ duration: 0.3 }}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Uploading... {progress}%</p>
+                </div>
+              )}
 
-          {currentView === 'drive' && !searchQuery && (
-              <Breadcrumbs
-                  breadcrumbs={breadcrumbs}
-                  onNavigate={(idx) => {
-                    const target = breadcrumbs[idx];
-                    setCurrentFolder(target.id);
-                    setBreadcrumbs(prev => prev.slice(0, idx + 1));
-                  }}
+              <FileGrid
+                files={content.files}
+                folders={content.folders}
+                viewMode={viewMode}
+                sortBy={sortBy}
+                isTrashView={currentView === 'trash'}
+                onNavigate={handleItemDoubleClick}
+                onContextMenu={(e, item, type) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  const x = Math.min(e.clientX, window.innerWidth - 220);
+                  const y = Math.min(e.clientY, window.innerHeight - 300);
+                  setMenu({ x, y, item, type: type || item.type });
+                }}
               />
-          )}
+            </div>
+          </>
+        )}
 
-          <FileGrid
-              items={[...(content.folders || []), ...(content.files || [])]}
-              viewMode={viewMode}
-              sortBy={sortBy}
-              onNavigate={(item) => handleAction('open', item)}
-              onAction={handleAction}
-              onMove={handleMoveItem}
-              onContextMenu={(e, item, type) => setMenuPos({ x: e.clientX, y: e.clientY, item, type })}
-              isTrashView={currentView === 'trash'}
+        {/* Context Menu */}
+        {menu && (
+          <ContextMenu
+            {...menu}
+            onClose={() => setMenu(null)}
+            onAction={handleAction}
+            isTrashView={currentView === 'trash'}
           />
-        </main>
+        )}
 
-        <UploadProgress progress={progress} />
+      </main>
 
-        <CreateFolderModal isOpen={activeModal === 'createFolder'} onClose={() => setActiveModal(null)} onCreate={(name) => { handleCreateFolder(name); setActiveModal(null); }} />
-        <PreviewModal file={activeModal === 'preview' ? selectedItem : null} onClose={() => setActiveModal(null)} onDownload={(f) => handleAction('download', f)} />
-        <InfoModal file={activeModal === 'info' ? selectedItem : null} onClose={() => setActiveModal(null)} breadcrumbs={breadcrumbs} />
-      </div>
+      {/* Modals */}
+      <ShareModal
+        isOpen={!!shareModalItem}
+        onClose={() => setShareModalItem(null)}
+        item={shareModalItem}
+      />
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        stats={stats}
+      />
+      <ProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        stats={stats}
+      />
+
+      {/* Preview Modal */}
+      {previewFile && (
+        <PreviewModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+          onDownload={handleDownload}
+        />
+      )}
+    </motion.div>
   );
 };
 

@@ -6,24 +6,23 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-@Service // <--- ADD THIS ANNOTATION
+
+@Service
 public class StorageService {
 
 	private final MinioClient minioClient;
 	private static final String BUCKET_NAME = "drive-chunks";
 
 	public StorageService() {
-		// 1. Connect to the Docker MinIO instance
-		// Note: In production, these credentials should come from Environment Variables, not hardcoded strings.
+		// Connect to MinIO
 		this.minioClient = MinioClient.builder()
-				.endpoint("http://localhost:9000") // The API port, NOT the console port (9001)
+				.endpoint("http://localhost:9000")
 				.credentials("minioadmin", "minioadmin")
 				.build();
 
 		initializeBucket();
 	}
 
-	// Ensure the bucket exists on startup
 	private void initializeBucket() {
 		try {
 			boolean found = minioClient.bucketExists(BucketExistsArgs.builder().bucket(BUCKET_NAME).build());
@@ -38,61 +37,47 @@ public class StorageService {
 		}
 	}
 
-	/**
-	 * Uploads a chunk to MinIO.
-	 * The "Chunk Hash" is used as the filename (Object Key).
-	 * This creates a Content-Addressable Storage system.
-	 */
 	public void uploadChunk(String chunkHash, byte[] data) {
 		try (InputStream stream = new ByteArrayInputStream(data)) {
 			minioClient.putObject(
 					PutObjectArgs.builder()
 							.bucket(BUCKET_NAME)
-							.object(chunkHash) // The filename is the hash!
+							.object(chunkHash)
 							.stream(stream, data.length, -1)
 							.contentType("application/octet-stream")
 							.build()
 			);
-			// System.out.println(" -> Stored chunk: " + chunkHash); // verbose logging
 		} catch (Exception e) {
 			throw new RuntimeException("Failed to upload chunk " + chunkHash, e);
 		}
 	}
 
-	/**
-	 * Checks if a chunk physically exists in MinIO.
-	 * This backs up our database/cache check for extra reliability.
-	 */
 	public boolean doesChunkExist(String chunkHash) {
 		try {
-			minioClient.statObject(
-					StatObjectArgs.builder()
-							.bucket(BUCKET_NAME)
-							.object(chunkHash)
-							.build()
-			);
+			minioClient.statObject(StatObjectArgs.builder().bucket(BUCKET_NAME).object(chunkHash).build());
 			return true;
 		} catch (ErrorResponseException e) {
-			if (e.errorResponse().code().equals("NoSuchKey")) {
-				return false;
-			}
-			throw new RuntimeException("Error checking chunk existence", e);
+			if (e.errorResponse().code().equals("NoSuchKey")) return false;
+			throw new RuntimeException("Error checking chunk", e);
 		} catch (Exception e) {
-			throw new RuntimeException("Error checking chunk existence", e);
+			throw new RuntimeException("Error checking chunk", e);
 		}
 	}
 
-	// Download a single chunk
-	public byte[] downloadChunk(String hash) {
-		try {
-			return minioClient.getObject(
-					GetObjectArgs.builder()
-							.bucket(BUCKET_NAME)
-							.object(hash)
-							.build()
-			).readAllBytes();
+	/**
+	 * Downloads a raw chunk from MinIO.
+	 * Used for file re-assembly and Zip generation.
+	 */
+	public byte[] downloadChunk(String chunkHash) {
+		try (InputStream stream = minioClient.getObject(
+				GetObjectArgs.builder()
+						.bucket(BUCKET_NAME) // Fixed variable name here
+						.object(chunkHash)
+						.build())) {
+			return stream.readAllBytes();
 		} catch (Exception e) {
-			throw new RuntimeException("Failed to fetch chunk: " + hash, e);
+			e.printStackTrace();
+			return new byte[0]; // Return empty byte array to prevent Zip stream crash
 		}
 	}
 }

@@ -5,7 +5,6 @@ import { useNavigate } from 'react-router-dom';
 import { calculateHash } from '../utils/helpers';
 
 export const useDriveContent = () => {
-    // --- INTERNAL STATE ---
     const [content, setContent] = useState({ folders: [], files: [] });
     const [currentView, setCurrentView] = useState('drive');
     const [currentFolder, setCurrentFolder] = useState(null);
@@ -16,9 +15,7 @@ export const useDriveContent = () => {
     const navigate = useNavigate();
     const CHUNK_SIZE = 1024 * 1024;
 
-    // --- FETCH LOGIC ---
     const fetchContent = useCallback(async (searchQuery = "") => {
-        // If in search view but query is empty, don't fetch
         if (currentView === 'search' && !searchQuery) return;
 
         try {
@@ -28,7 +25,6 @@ export const useDriveContent = () => {
             if (searchQuery) {
                 url = '/drive/search';
                 params.query = searchQuery;
-                // If we are searching, we temporarily switch view logic in the UI
             } else if (currentView === 'drive') {
                 if (currentFolder) params.folderId = currentFolder;
             } else {
@@ -37,7 +33,6 @@ export const useDriveContent = () => {
 
             const res = await api.get(url, { params });
 
-            // If searching, the API returns a list, so we map it to our structure
             if (url.includes('search')) {
                 setContent({ folders: [], files: res.data });
             } else {
@@ -53,11 +48,7 @@ export const useDriveContent = () => {
         try { const res = await api.get('/drive/stats'); setStats(res.data); } catch(e){}
     }, []);
 
-    // Initial Load
-    useEffect(() => {
-        fetchContent();
-        fetchStats();
-    }, [fetchContent, fetchStats]);
+    useEffect(() => { fetchContent(); fetchStats(); }, [fetchContent, fetchStats]);
 
     // --- ACTIONS ---
     const handleUpload = async (files) => {
@@ -84,10 +75,7 @@ export const useDriveContent = () => {
                 }
                 await api.post(`/drive/complete?uploadId=${uploadId}`);
                 toast.success(`Uploaded ${file.name}`);
-            } catch (error) {
-                console.error(error);
-                toast.error(typeof error.response?.data === 'string' ? error.response.data : "Upload Failed");
-            }
+            } catch (error) { toast.error("Upload Failed"); }
         }
         setProgress(0);
         fetchContent();
@@ -102,37 +90,54 @@ export const useDriveContent = () => {
         } catch (err) { toast.error("Failed to create folder"); return false; }
     };
 
-    const handleMoveItem = async (itemId, type, targetFolderId) => {
+    const deleteItem = async (item, permanent = false) => {
         try {
-            await api.post('/drive/action/move', { id: itemId, type, targetId: targetFolderId });
-            toast.success("Moved successfully");
+            if (permanent) {
+                await api.delete(`/drive/${item.id}/permanent`);
+                toast.success("Deleted forever");
+            } else {
+                await api.post('/drive/action/trash', {
+                    id: item.id,
+                    type: item.type, // Explicitly sending 'folder' or 'file'
+                    value: true
+                });
+                toast.success("Moved to Trash");
+            }
             fetchContent();
-        } catch (err) { toast.error("Move failed"); }
+            fetchStats();
+        } catch (e) { toast.error("Action failed"); }
     };
 
-    const deleteItem = async (id, permanent = false) => {
+    const restoreItem = async (item) => {
         try {
-            if (permanent) await api.delete(`/drive/${id}/permanent`);
-            else await api.post('/drive/action/trash', { id, value: true });
+            await api.post('/drive/action/trash', {
+                id: item.id,
+                type: item.type,
+                value: false
+            });
+            toast.success("Restored");
             fetchContent();
-            fetchStats(); // Update storage meter
-            toast.success(permanent ? "Deleted forever" : "Moved to Trash");
-        } catch (e) { toast.error("Delete failed"); }
+        } catch (e) { toast.error("Restore failed"); }
     };
 
-    // --- RETURN EVERYTHING NEEDED BY DASHBOARD ---
+    const toggleStar = async (item) => {
+        try {
+            await api.post('/drive/action/star', {
+                id: item.id,
+                type: item.type,
+                value: !item.starred
+            });
+            fetchContent();
+        } catch (e) { toast.error("Failed to update star"); }
+    };
+
     return {
-        // State
         content, stats, progress,
         currentView, setCurrentView,
         currentFolder, setCurrentFolder,
         breadcrumbs, setBreadcrumbs,
 
-        // Actions
-        fetchContent, // <--- This solves your error!
-        handleUpload,
-        handleCreateFolder,
-        handleMoveItem,
-        deleteItem
+        fetchContent, handleUpload, handleCreateFolder,
+        deleteItem, restoreItem, toggleStar
     };
 };
