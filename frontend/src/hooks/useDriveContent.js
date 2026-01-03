@@ -3,6 +3,7 @@ import api from '../api';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { calculateHash } from '../utils/helpers';
+import { useDriveWebSocket } from './useDriveWebSocket';
 
 export const useDriveContent = () => {
     const [content, setContent] = useState({ folders: [], files: [] });
@@ -11,9 +12,13 @@ export const useDriveContent = () => {
     const [breadcrumbs, setBreadcrumbs] = useState([{ id: null, name: 'My Drive' }]);
     const [stats, setStats] = useState({ count: 0, used: 0 });
     const [progress, setProgress] = useState(0);
+    const [wsConnected, setWsConnected] = useState(false);
 
     const navigate = useNavigate();
     const CHUNK_SIZE = 1024 * 1024;
+
+    // Get username from localStorage (set during login)
+    const username = localStorage.getItem('username') || '';
 
     const fetchContent = useCallback(async (searchQuery = "") => {
         if (currentView === 'search' && !searchQuery) return;
@@ -45,8 +50,46 @@ export const useDriveContent = () => {
     }, [currentView, currentFolder, navigate]);
 
     const fetchStats = useCallback(async () => {
-        try { const res = await api.get('/drive/stats'); setStats(res.data); } catch(e){}
+        try { const res = await api.get('/drive/stats'); setStats(res.data); } catch (e) { }
     }, []);
+
+    // WebSocket real-time updates
+    const { connected } = useDriveWebSocket(username, {
+        onFileUploaded: (event) => {
+            // If uploaded to current folder or viewing all files, refresh
+            if (event.folderId === currentFolder || event.folderId === 'root' && !currentFolder) {
+                toast.success(`New file: ${event.fileName}`, { icon: '📁' });
+                fetchContent();
+                fetchStats();
+            }
+        },
+        onFileDeleted: (event) => {
+            toast(`File moved to trash`, { icon: '🗑️' });
+            fetchContent();
+            fetchStats();
+        },
+        onFolderCreated: (event) => {
+            if (event.parentId === currentFolder || (event.parentId === null && !currentFolder)) {
+                toast.success(`New folder: ${event.folderName}`, { icon: '📂' });
+                fetchContent();
+            }
+        },
+        onFileRestored: (event) => {
+            toast.success(`File restored: ${event.fileName}`, { icon: '♻️' });
+            fetchContent();
+            fetchStats();
+        },
+        onStarChanged: (event) => {
+            fetchContent();
+        },
+        onVersionCreated: (event) => {
+            toast(`New version of ${event.fileName}`, { icon: '📝' });
+        }
+    });
+
+    useEffect(() => {
+        setWsConnected(connected);
+    }, [connected]);
 
     useEffect(() => { fetchContent(); fetchStats(); }, [fetchContent, fetchStats]);
 

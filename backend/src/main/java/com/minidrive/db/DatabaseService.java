@@ -27,11 +27,12 @@ public class DatabaseService {
 				? envDbUrl : "jdbc:postgresql://localhost:5432/minidrive");
 		config.setUsername(envDbUser != null ? envDbUser : "admin");
 		config.setPassword(envDbPass != null ? envDbPass : "password123");
-		config.setMaximumPoolSize(10);
-		config.setMinimumIdle(2);
-		config.setConnectionTimeout(30000);
+		config.setMaximumPoolSize(30);           // Tripled for concurrent chunk uploads
+		config.setMinimumIdle(5);                // Pre-warm more connections
+		config.setConnectionTimeout(10000);      // Fail faster (10s) for better UX
 		config.setIdleTimeout(600000);
 		config.setMaxLifetime(1800000);
+		config.setLeakDetectionThreshold(60000); // Detect connection leaks after 60s
 
 		this.dataSource = new HikariDataSource(config);
 		initDB();
@@ -47,15 +48,19 @@ public class DatabaseService {
 		try (Connection conn = dataSource.getConnection();
 			 Statement stmt = conn.createStatement()) {
 
-			// 1. Users
+			// 1. Users (with encryption_key for zero-knowledge encryption)
 			stmt.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id UUID PRIMARY KEY,
                     username VARCHAR(50) UNIQUE NOT NULL,
                     password VARCHAR(255) NOT NULL,
+                    encryption_key TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """);
+			
+			// Add encryption_key column if not exists (for existing DBs)
+			safeExecute(stmt, "ALTER TABLE users ADD COLUMN IF NOT EXISTS encryption_key TEXT");
 
 			// 2. Folders - WITH CASCADE ON SELF-REFERENCE
 			stmt.execute("""
@@ -207,6 +212,17 @@ public class DatabaseService {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Public method to get user ID by username.
+	 */
+	public String getUserId(String username) {
+		try (Connection conn = dataSource.getConnection()) {
+			return getUserId(conn, username);
+		} catch (SQLException e) {
+			return null;
+		}
 	}
 
 	private String requireUserId(Connection conn, String username) throws SQLException {

@@ -1,6 +1,7 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "name": "SanchayCloud - Secure Cloud Storage",
+  "short_name": "SanchayCloud",
+  "description": "Your secure cloud drive with zero-knowledge encryption, file versioning, and real-time sync.",
   "icons": [
     {
       "src": "favicon.ico",
@@ -10,16 +11,52 @@
     {
       "src": "logo192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any maskable"
     },
     {
       "src": "logo512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "orientation": "any",
+  "theme_color": "#6366f1",
+  "background_color": "#0a0a0f",
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
+  "shortcuts": [
+    {
+      "name": "Upload File",
+      "short_name": "Upload",
+      "description": "Upload a new file to your drive",
+      "url": "/?action=upload",
+      "icons": [
+        {
+          "src": "logo192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "My Vault",
+      "short_name": "Vault",
+      "description": "Access your encrypted vault",
+      "url": "/?view=vault",
+      "icons": [
+        {
+          "src": "logo192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
 }

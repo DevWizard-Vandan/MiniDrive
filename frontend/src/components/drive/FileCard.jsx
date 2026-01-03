@@ -1,63 +1,57 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { File, FileImage, FileVideo, FileText, FileArchive, Folder, Star } from 'lucide-react';
 import { formatBytes } from '../../utils/helpers';
 
 const FileCard = ({ item, type, index = 0, onNavigate, onMove, isTrashView, onContextMenu }) => {
     const isFolder = type === 'folder';
-    const [tilt, setTilt] = useState({ x: 0, y: 0 });
+    const cardRef = useRef(null);
+    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const [isHovered, setIsHovered] = useState(false);
 
-    // Icon Configuration
+    // File type config
     let Icon = File;
-    let colorClass = "from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800";
-    let iconColor = "text-slate-500 dark:text-slate-400";
-    let glowColor = "slate";
+    let gradientFrom = '#64748b';
+    let gradientTo = '#475569';
 
     if (isFolder) {
         Icon = Folder;
-        colorClass = "from-indigo-100 to-indigo-200 dark:from-indigo-900/50 dark:to-indigo-800/50";
-        iconColor = "text-indigo-500 dark:text-indigo-400";
-        glowColor = "indigo";
+        gradientFrom = '#6366f1';
+        gradientTo = '#8b5cf6';
     } else {
         const ext = item.name.split('.').pop().toLowerCase();
         if (['jpg', 'png', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
-            colorClass = "from-purple-100 to-purple-200 dark:from-purple-900/50 dark:to-purple-800/50";
-            iconColor = "text-purple-500 dark:text-purple-400";
             Icon = FileImage;
-            glowColor = "purple";
+            gradientFrom = '#8b5cf6';
+            gradientTo = '#ec4899';
         }
         if (['mp4', 'mkv', 'mov', 'avi', 'webm'].includes(ext)) {
-            colorClass = "from-red-100 to-red-200 dark:from-red-900/50 dark:to-red-800/50";
-            iconColor = "text-red-500 dark:text-red-400";
             Icon = FileVideo;
-            glowColor = "red";
+            gradientFrom = '#ef4444';
+            gradientTo = '#f97316';
         }
         if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) {
-            colorClass = "from-blue-100 to-blue-200 dark:from-blue-900/50 dark:to-blue-800/50";
-            iconColor = "text-blue-500 dark:text-blue-400";
             Icon = FileText;
-            glowColor = "blue";
+            gradientFrom = '#3b82f6';
+            gradientTo = '#06b6d4';
         }
         if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
-            colorClass = "from-amber-100 to-amber-200 dark:from-amber-900/50 dark:to-amber-800/50";
-            iconColor = "text-amber-500 dark:text-amber-400";
             Icon = FileArchive;
-            glowColor = "amber";
+            gradientFrom = '#f59e0b';
+            gradientTo = '#eab308';
         }
     }
 
-    // 3D Tilt effect handler
+    // 3D tilt + light source tracking
     const handleMouseMove = (e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const x = (e.clientX - rect.left) / rect.width - 0.5;
-        const y = (e.clientY - rect.top) / rect.height - 0.5;
-        setTilt({ x: y * 15, y: -x * 15 });
-    };
+        const card = cardRef.current;
+        if (!card) return;
 
-    const handleMouseLeave = () => {
-        setTilt({ x: 0, y: 0 });
-        setIsHovered(false);
+        const rect = card.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / rect.width;
+        const y = (e.clientY - rect.top) / rect.height;
+
+        setMousePos({ x, y });
     };
 
     const handleDragStart = (e) => {
@@ -66,7 +60,8 @@ const FileCard = ({ item, type, index = 0, onNavigate, onMove, isTrashView, onCo
     };
 
     const handleDrop = (e) => {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefault();
+        e.stopPropagation();
         const draggedId = e.dataTransfer.getData("itemId");
         const draggedType = e.dataTransfer.getData("itemType");
         if (isFolder && draggedId !== item.id.toString() && onMove) {
@@ -74,110 +69,138 @@ const FileCard = ({ item, type, index = 0, onNavigate, onMove, isTrashView, onCo
         }
     };
 
-    const glowColors = {
-        slate: 'rgba(100, 116, 139, 0.3)',
-        indigo: 'rgba(99, 102, 241, 0.4)',
-        purple: 'rgba(139, 92, 246, 0.4)',
-        red: 'rgba(239, 68, 68, 0.4)',
-        blue: 'rgba(59, 130, 246, 0.4)',
-        amber: 'rgba(245, 158, 11, 0.4)'
-    };
+    // Calculate 3D transform
+    const rotateX = isHovered ? (mousePos.y - 0.5) * -15 : 0;
+    const rotateY = isHovered ? (mousePos.x - 0.5) * 15 : 0;
+
+    // Light position for gradient effect
+    const lightX = mousePos.x * 100;
+    const lightY = mousePos.y * 100;
 
     return (
         <motion.div
+            ref={cardRef}
             layout
-            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            initial={{ opacity: 0, y: 30 }}
             animate={{
                 opacity: 1,
-                scale: 1,
                 y: 0,
-                rotateX: tilt.x,
-                rotateY: tilt.y
+                rotateX,
+                rotateY,
+                z: isHovered ? 50 : 0,
             }}
-            exit={{ opacity: 0, scale: 0.8, y: -20 }}
-            transition={{ delay: index * 0.03, type: "spring", stiffness: 300, damping: 25 }}
-            whileHover={{ y: -6, scale: 1.02 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{
+                delay: index * 0.02,
+                type: "spring",
+                stiffness: 200,
+                damping: 20
+            }}
             onMouseMove={handleMouseMove}
             onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={handleMouseLeave}
+            onMouseLeave={() => { setIsHovered(false); setMousePos({ x: 0.5, y: 0.5 }); }}
             draggable={!isTrashView}
             onDragStart={handleDragStart}
             onDragOver={(e) => isFolder && e.preventDefault()}
             onDrop={handleDrop}
             onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, item, type); }}
-            onDoubleClick={() => isFolder && !isTrashView && onNavigate?.(item)}
-            className="group relative p-3 rounded-2xl cursor-pointer bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700"
+            onDoubleClick={() => !isTrashView && onNavigate?.(item, type)}
+            className="group relative cursor-pointer"
             style={{
                 transformStyle: 'preserve-3d',
-                perspective: '1000px',
-                boxShadow: isHovered
-                    ? `0 20px 40px -10px ${glowColors[glowColor]}, 0 0 30px ${glowColors[glowColor]}`
-                    : '0 2px 4px rgba(0,0,0,0.05)'
+                perspective: 1000,
             }}
         >
-            {/* Animated gradient border on hover */}
-            <motion.div
-                className="absolute inset-0 rounded-2xl pointer-events-none overflow-hidden"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: isHovered ? 1 : 0 }}
-                transition={{ duration: 0.3 }}
-            >
-                <div className="absolute inset-[-2px] bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-2xl opacity-50 blur-sm animate-pulse" />
-            </motion.div>
-
-            {/* Shimmer effect on hover */}
-            <motion.div
-                className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none"
-                initial={{ x: '-100%' }}
-                animate={{ x: isHovered ? '200%' : '-100%' }}
-                transition={{ duration: 0.8, ease: 'easeInOut' }}
-            >
-                <div className="w-1/3 h-full bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12" />
-            </motion.div>
-
-            {/* Icon Container with 3D effect */}
-            <motion.div
-                animate={{
-                    translateZ: isHovered ? 30 : 0,
-                    scale: isHovered ? 1.1 : 1
+            {/* Card container */}
+            <div
+                className="relative p-4 rounded-2xl overflow-hidden transition-shadow duration-300"
+                style={{
+                    background: `linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)`,
+                    backdropFilter: 'blur(12px)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    boxShadow: isHovered
+                        ? `0 25px 50px -12px rgba(0,0,0,0.5), 0 0 40px ${gradientFrom}30`
+                        : '0 4px 20px rgba(0,0,0,0.2)',
                 }}
-                transition={{ type: 'spring', stiffness: 300 }}
-                className={`relative aspect-square rounded-xl flex items-center justify-center mb-3 bg-gradient-to-br ${colorClass} transition-all duration-300`}
-                style={{ transformStyle: 'preserve-3d' }}
             >
-                <motion.div
-                    animate={{ rotate: isHovered ? [0, -10, 10, 0] : 0 }}
-                    transition={{ duration: 0.5 }}
-                >
-                    <Icon size={32} className={`${iconColor} drop-shadow-lg`} />
-                </motion.div>
-            </motion.div>
+                {/* Light source overlay */}
+                <div
+                    className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+                    style={{
+                        background: `radial-gradient(circle at ${lightX}% ${lightY}%, rgba(255,255,255,0.15) 0%, transparent 60%)`,
+                    }}
+                />
 
-            {/* File Info with depth */}
-            <motion.div
-                className="space-y-0.5 relative"
-                style={{ transformStyle: 'preserve-3d' }}
-                animate={{ translateZ: isHovered ? 15 : 0 }}
-            >
-                <div className="flex justify-between items-start gap-1">
-                    <h3 className="font-medium text-slate-700 dark:text-slate-200 text-sm truncate flex-1" title={item.name}>
-                        {item.name}
-                    </h3>
-                    {item.starred && !isTrashView && (
-                        <motion.div
-                            initial={{ scale: 0, rotate: -180 }}
-                            animate={{ scale: 1, rotate: 0 }}
-                            whileHover={{ scale: 1.3, rotate: 15 }}
-                            className="flex-shrink-0"
-                        >
-                            <Star size={12} className="text-yellow-500 fill-yellow-500 mt-0.5 drop-shadow-md" />
-                        </motion.div>
-                    )}
+                {/* Gradient border glow on hover */}
+                <motion.div
+                    className="absolute -inset-px rounded-2xl pointer-events-none"
+                    animate={{ opacity: isHovered ? 1 : 0 }}
+                    transition={{ duration: 0.3 }}
+                    style={{
+                        background: `linear-gradient(135deg, ${gradientFrom}50, ${gradientTo}50)`,
+                        filter: 'blur(1px)',
+                    }}
+                />
+
+                {/* Icon Container */}
+                <motion.div
+                    animate={{
+                        scale: isHovered ? 1.1 : 1,
+                        y: isHovered ? -5 : 0,
+                    }}
+                    transition={{ type: 'spring', stiffness: 300 }}
+                    className="relative aspect-square rounded-xl flex items-center justify-center mb-3 overflow-hidden"
+                    style={{
+                        background: `linear-gradient(135deg, ${gradientFrom}20, ${gradientTo}20)`,
+                        transformStyle: 'preserve-3d',
+                        transform: `translateZ(${isHovered ? 30 : 0}px)`,
+                    }}
+                >
+                    {/* Icon glow */}
+                    <motion.div
+                        className="absolute inset-0"
+                        animate={{ opacity: isHovered ? 0.6 : 0 }}
+                        style={{
+                            background: `radial-gradient(circle, ${gradientFrom}40 0%, transparent 70%)`,
+                        }}
+                    />
+
+                    <motion.div
+                        animate={{ rotate: isHovered ? [0, -5, 5, 0] : 0 }}
+                        transition={{ duration: 0.4 }}
+                    >
+                        <Icon
+                            size={36}
+                            style={{ color: gradientFrom }}
+                            className="relative z-10 drop-shadow-lg"
+                        />
+                    </motion.div>
+                </motion.div>
+
+                {/* File info */}
+                <div
+                    className="relative space-y-1"
+                    style={{ transform: `translateZ(${isHovered ? 20 : 0}px)` }}
+                >
+                    <div className="flex items-start gap-2">
+                        <h3 className="flex-1 font-medium text-white/90 text-sm truncate" title={item.name}>
+                            {item.name}
+                        </h3>
+                        {item.starred && !isTrashView && (
+                            <motion.div
+                                initial={{ scale: 0, rotate: -180 }}
+                                animate={{ scale: 1, rotate: 0 }}
+                                whileHover={{ scale: 1.2, rotate: 15 }}
+                            >
+                                <Star size={14} className="text-yellow-400 fill-yellow-400 flex-shrink-0" />
+                            </motion.div>
+                        )}
+                    </div>
+                    <p className="text-xs text-white/40">
+                        {isFolder ? "Folder" : formatBytes(item.size)}
+                    </p>
                 </div>
-                <p className="text-xs text-slate-400 dark:text-slate-500">
-                    {isFolder ? "Folder" : formatBytes(item.size)}
-                </p>
-            </motion.div>
+            </div>
         </motion.div>
     );
 };

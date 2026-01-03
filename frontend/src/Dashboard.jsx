@@ -11,14 +11,16 @@ import ShareModal from './components/modals/ShareModal';
 import SettingsModal from './components/modals/SettingsModal';
 import ProfileModal from './components/modals/ProfileModal';
 import PreviewModal from './components/modals/PreviewModal';
+import ChatWithDrive from './components/memory/ChatWithDrive';
+import GraphView from './components/memory/GraphView';
 import toast from 'react-hot-toast';
 import api from './api';
 import { Home, ChevronRight, LayoutGrid, List, Upload } from 'lucide-react';
 
 const pageVariants = {
-  initial: { opacity: 0, y: 20 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -20 }
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 }
 };
 
 const Dashboard = () => {
@@ -216,7 +218,7 @@ const Dashboard = () => {
       animate="animate"
       exit="exit"
       transition={{ duration: 0.3 }}
-      className="flex h-screen bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans overflow-hidden selection:bg-indigo-100 dark:selection:bg-indigo-900 transition-colors duration-300"
+      className="flex h-screen bg-[#0a0a0f] text-white font-sans overflow-hidden"
     >
 
       {/* Hidden File Input */}
@@ -311,6 +313,13 @@ const Dashboard = () => {
                     <List size={18} />
                   </button>
                 </div>
+
+                {/* Graph View */}
+                <GraphView onSelectFile={(fileId) => {
+                  // Find file and open preview
+                  const file = content.files.find(f => f.file_id === fileId);
+                  if (file) setPreviewFile({ ...file, type: 'file' });
+                }} />
               </div>
             </div>
 
@@ -413,6 +422,9 @@ const Dashboard = () => {
           onDownload={handleDownload}
         />
       )}
+
+      {/* Sanchay Memory - Chat with Drive */}
+      <ChatWithDrive />
     </motion.div>
   );
 };

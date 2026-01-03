@@ -1,6 +1,7 @@
 package com.minidrive.auth;
 
 import com.minidrive.db.DatabaseService;
+import com.minidrive.service.EncryptionService;
 import io.jsonwebtoken.Claims; // Import
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
@@ -22,6 +23,9 @@ public class AuthService {
 	@Autowired
 	private DatabaseService db;
 
+	@Autowired
+	private EncryptionService encryptionService;
+
 	private final PasswordEncoder encoder = new BCryptPasswordEncoder();
 
 	// FIX: Use a HARDCODED secret so it persists across restarts.
@@ -36,10 +40,17 @@ public class AuthService {
 			if (check.executeQuery().next()) throw new RuntimeException("User already exists");
 
 			String id = UUID.randomUUID().toString();
-			PreparedStatement ps = conn.prepareStatement("INSERT INTO users (id, username, password) VALUES (?, ?, ?)");
+			
+			// Generate user's encryption key (encrypted with master key)
+			String encryptedKey = encryptionService.generateUserKey();
+			
+			PreparedStatement ps = conn.prepareStatement(
+				"INSERT INTO users (id, username, password, encryption_key) VALUES (?, ?, ?, ?)"
+			);
 			ps.setObject(1, UUID.fromString(id));
 			ps.setString(2, username);
 			ps.setString(3, encoder.encode(password));
+			ps.setString(4, encryptedKey);
 			ps.executeUpdate();
 
 			return generateToken(username);
@@ -69,6 +80,13 @@ public class AuthService {
 				.setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 10)) // 10 hours
 				.signWith(key)
 				.compact();
+	}
+
+	/**
+	 * Public token generation for passkey authentication.
+	 */
+	public String generateTokenPublic(String username) {
+		return generateToken(username);
 	}
 
 	// --- NEW: Method to Validate Token ---
@@ -101,6 +119,25 @@ public class AuthService {
 			return false;
 		} catch (SQLException e) {
 			return false;
+		}
+	}
+
+	/**
+	 * Get user's encrypted encryption key (for Zero-Knowledge encryption).
+	 * Returns null if user doesn't exist or has no key.
+	 */
+	public String getUserEncryptionKey(String username) {
+		try (Connection conn = db.getDataSource().getConnection()) {
+			PreparedStatement ps = conn.prepareStatement("SELECT encryption_key FROM users WHERE username = ?");
+			ps.setString(1, username);
+			ResultSet rs = ps.executeQuery();
+
+			if (rs.next()) {
+				return rs.getString("encryption_key");
+			}
+			return null;
+		} catch (SQLException e) {
+			return null;
 		}
 	}
 }
