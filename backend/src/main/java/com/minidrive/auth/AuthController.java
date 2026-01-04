@@ -29,7 +29,7 @@ public class AuthController {
 			String token = authService.register(body.get("username"), body.get("password"));
 			return ResponseEntity.ok(Map.of("token", token));
 		} catch (Exception e) {
-			return ResponseEntity.badRequest().body(e.getMessage());
+			return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
 		}
 	}
 
@@ -39,7 +39,7 @@ public class AuthController {
 			String token = authService.login(body.get("username"), body.get("password"));
 			return ResponseEntity.ok(Map.of("token", token));
 		} catch (Exception e) {
-			return ResponseEntity.status(401).body(e.getMessage());
+			return ResponseEntity.status(401).body(Map.of("message", e.getMessage()));
 		}
 	}
 

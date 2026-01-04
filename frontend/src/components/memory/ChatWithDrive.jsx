@@ -36,9 +36,21 @@ const ChatWithDrive = () => {
 
             setMessages(prev => [...prev, assistantMessage]);
         } catch (error) {
+            let errorMessage = 'Sorry, I encountered an error. Please try again.';
+
+            if (error.response?.data?.error) {
+                errorMessage = error.response.data.error;
+            } else if (error.response?.status === 401) {
+                errorMessage = 'Session expired. Please log in again.';
+            } else if (error.response?.status === 404) {
+                errorMessage = 'Chat service not available. Please check if the backend is running.';
+            } else if (!navigator.onLine) {
+                errorMessage = 'You appear to be offline. Please check your connection.';
+            }
+
             setMessages(prev => [...prev, {
                 role: 'assistant',
-                content: 'Sorry, I encountered an error. Please try again.',
+                content: errorMessage,
                 error: true
             }]);
         } finally {
@@ -116,8 +128,8 @@ const ChatWithDrive = () => {
                                     className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                                 >
                                     <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm ${msg.role === 'user'
-                                            ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white'
-                                            : 'bg-white/5 text-white/90 border border-white/10'
+                                        ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white'
+                                        : 'bg-white/5 text-white/90 border border-white/10'
                                         }`}>
                                         {msg.content}
 

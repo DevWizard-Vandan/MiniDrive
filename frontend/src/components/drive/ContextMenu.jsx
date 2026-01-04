@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw, XCircle, Folder, Eye, Download, Star, Share2, Info, Trash2 } from 'lucide-react';
+import { RefreshCw, XCircle, Folder, Eye, Download, Star, Share2, Info, Trash2, Lock } from 'lucide-react';
 
 const ContextMenu = ({ x, y, item, type, onClose, onAction, isTrashView }) => {
 
@@ -63,6 +63,7 @@ const ContextMenu = ({ x, y, item, type, onClose, onAction, isTrashView }) => {
                     <div className="h-px bg-white/5 my-1" />
 
                     <MenuBtn icon={Star} label={item.starred ? 'Remove Star' : 'Add Star'} onClick={() => onAction('star', item)} />
+                    <MenuBtn icon={Lock} label={item.vault ? 'Remove from Vault' : 'Move to Vault'} onClick={() => onAction('vault', item)} />
                     <MenuBtn icon={Share2} label="Share" onClick={() => onAction('share', item)} />
                     <MenuBtn icon={Info} label="Properties" onClick={() => onAction('info', item)} />
 

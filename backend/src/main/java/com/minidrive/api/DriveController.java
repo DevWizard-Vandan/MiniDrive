@@ -60,7 +60,61 @@ public class DriveController {
 	// === GLOBAL DEDUPLICATION (Zero-Knowledge) ===
 	@Autowired private com.minidrive.service.DeduplicationService deduplicationService;
 
+	// === SANCHAY MEMORY (Semantic Search) ===
+	@Autowired(required = false) private com.minidrive.memory.MemoryWorker memoryWorker;
+
 	// ==================== VIEW CONTENT ====================
+
+	// ==================== VIEW CONTENT (INLINE) ====================
+
+	@GetMapping("/view/{fileId}")
+	public ResponseEntity<StreamingResponseBody> viewFile(@PathVariable String fileId, Authentication authentication) {
+		if (authentication == null) return ResponseEntity.status(401).build();
+
+		// Use ID-based lookup for reliability
+		Map<String, Object> metadata = fileRepository.getFileMetadataById(fileId, authentication.getName());
+		if (metadata == null) return ResponseEntity.notFound().build();
+
+		String filename = (String) metadata.get("name");
+		Long fileSize = (Long) metadata.get("size");
+		List<String> chunks = fileRepository.getFileChunks(fileId);
+		String username = authentication.getName();
+
+		SecretKey userKey = getUserEncryptionKey(username);
+
+		// Determine content type
+		String contentType = "application/octet-stream";
+		String lowerName = filename.toLowerCase();
+		if (lowerName.endsWith(".pdf")) contentType = "application/pdf";
+		else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) contentType = "image/jpeg";
+		else if (lowerName.endsWith(".png")) contentType = "image/png";
+		else if (lowerName.endsWith(".gif")) contentType = "image/gif";
+		else if (lowerName.endsWith(".mp4")) contentType = "video/mp4";
+		else if (lowerName.endsWith(".txt")) contentType = "text/plain";
+
+		StreamingResponseBody stream = outputStream -> {
+			for (String hash : chunks) {
+				byte[] chunkData;
+				if (userKey != null) {
+					try {
+						chunkData = storageService.downloadChunkEncrypted(hash, userKey);
+					} catch (Exception e) {
+						chunkData = storageService.downloadChunk(hash);
+					}
+				} else {
+					chunkData = storageService.downloadChunk(hash);
+				}
+				outputStream.write(chunkData);
+				outputStream.flush();
+			}
+		};
+
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+				.contentLength(fileSize)
+				.contentType(MediaType.parseMediaType(contentType))
+				.body(stream);
+	}
 
 	@GetMapping("/content")
 	public ResponseEntity<?> getContent(
@@ -141,6 +195,22 @@ public class DriveController {
 		if (result.success) {
 			driveEventPublisher.publishStarChanged(auth.getName(), (String) body.get("id"), (String) body.get("type"), (Boolean) body.get("value"));
 		}
+		return result.success ? ResponseEntity.ok().build() : ResponseEntity.badRequest().body(result.message);
+	}
+
+	@PostMapping("/action/vault")
+	@Transactional
+	public ResponseEntity<?> vaultItem(@RequestBody Map<String, Object> body, Authentication auth) {
+		if (auth == null) return ResponseEntity.status(401).build();
+
+		DatabaseService.DbResult result = databaseService.toggleVault(
+				(String) body.get("id"),
+				"folder".equals(body.get("type")),
+				(Boolean) body.get("value"),
+				auth.getName()
+		);
+
+		// Reuse star event or create new if needed, but for now simple refresh
 		return result.success ? ResponseEntity.ok().build() : ResponseEntity.badRequest().body(result.message);
 	}
 
@@ -250,6 +320,17 @@ public class DriveController {
 
 		// Publish real-time event
 		driveEventPublisher.publishFileUploaded(username, newFileId, info.filename(), info.size(), info.folderId());
+
+		// Process for Sanchay Memory (async text extraction + embeddings)
+		if (memoryWorker != null) {
+			try {
+				String userId = databaseService.getUserId(username);
+				memoryWorker.processFileAsync(UUID.fromString(newFileId), userId, info.filename(), username);
+			} catch (Exception e) {
+				// Don't fail upload if memory processing fails
+				System.out.println("Memory processing skipped: " + e.getMessage());
+			}
+		}
 
 		return ResponseEntity.ok(newFileId);
 	}

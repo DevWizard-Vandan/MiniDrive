@@ -49,8 +49,9 @@ public class OllamaService {
      * Generate RAG response with context from similar chunks
      */
     public String generateResponse(String query, List<VectorRepository.SimilarChunk> context) {
+        // Fallback response when Ollama is not available
         if (chatModel == null) {
-            return "Chat is not available. Please ensure Ollama is running.";
+            return generateFallbackResponse(query, context);
         }
 
         // Build context string
@@ -66,9 +67,37 @@ public class OllamaService {
             String response = chatModel.generate(prompt);
             return response;
         } catch (Exception e) {
-            logger.error("Ollama generation failed: {}", e.getMessage());
-            return "Sorry, I couldn't process your query. Error: " + e.getMessage();
+            logger.warn("Ollama generation failed, using fallback: {}", e.getMessage());
+            return generateFallbackResponse(query, context);
         }
+    }
+
+    /**
+     * Fallback response when LLM is unavailable - provides relevant excerpts
+     */
+    private String generateFallbackResponse(String query, List<VectorRepository.SimilarChunk> context) {
+        if (context.isEmpty()) {
+            return "I couldn't find any files matching your query.";
+        }
+
+        StringBuilder response = new StringBuilder();
+        response.append("📚 **Based on your files, here's what I found:**\n\n");
+
+        for (int i = 0; i < Math.min(3, context.size()); i++) {
+            VectorRepository.SimilarChunk chunk = context.get(i);
+            String preview = chunk.content();
+            if (preview.length() > 300) {
+                preview = preview.substring(0, 300) + "...";
+            }
+            
+            response.append("**").append(chunk.filename()).append("** (")
+                    .append(Math.round(chunk.similarity() * 100)).append("% match):\n");
+            response.append("_").append(preview.replace("\n", " ")).append("_\n\n");
+        }
+
+        response.append("\n💡 *For AI-powered answers, please start Ollama locally with:* `ollama run deepseek-r1:1.5b`");
+        
+        return response.toString();
     }
 
     /**

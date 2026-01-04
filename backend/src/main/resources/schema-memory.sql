@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE IF NOT EXISTS file_embeddings (
     id SERIAL PRIMARY KEY,
     file_id UUID NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     chunk_content TEXT NOT NULL,
     embedding vector(384), -- all-minilm-l6-v2 produces 384-dim vectors
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS file_processing_status (
 -- Semantic file clusters (for auto-clustering visualization)
 CREATE TABLE IF NOT EXISTS file_clusters (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     cluster_name VARCHAR(255),
     cluster_color VARCHAR(20),
     centroid vector(384),

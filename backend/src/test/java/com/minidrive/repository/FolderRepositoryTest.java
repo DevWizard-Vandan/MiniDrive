@@ -28,6 +28,12 @@ class FolderRepositoryTest {
     @Autowired
     private DataSource dataSource;
 
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private io.minio.MinioClient minioClient;
+
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
+
     private static final String TEST_USER = "testuser";
     private static final String TEST_USER_ID = UUID.randomUUID().toString();
 

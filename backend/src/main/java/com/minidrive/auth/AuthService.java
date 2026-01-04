@@ -59,13 +59,26 @@ public class AuthService {
 
 	public String login(String username, String password) throws Exception {
 		try (Connection conn = db.getDataSource().getConnection()) {
-			PreparedStatement ps = conn.prepareStatement("SELECT password FROM users WHERE username = ?");
+			PreparedStatement ps = conn.prepareStatement("SELECT password, encryption_key FROM users WHERE username = ?");
 			ps.setString(1, username);
 			ResultSet rs = ps.executeQuery();
 
 			if (rs.next()) {
 				String hashed = rs.getString("password");
+				String existingKey = rs.getString("encryption_key");
+				
 				if (encoder.matches(password, hashed)) {
+					// Generate encryption key if user doesn't have one (legacy user migration)
+					if (existingKey == null || existingKey.isEmpty()) {
+						String encryptedKey = encryptionService.generateUserKey();
+						PreparedStatement update = conn.prepareStatement(
+							"UPDATE users SET encryption_key = ? WHERE username = ?"
+						);
+						update.setString(1, encryptedKey);
+						update.setString(2, username);
+						update.executeUpdate();
+						System.out.println("DEBUG: Generated new encryption key for user: " + username);
+					}
 					return generateToken(username);
 				}
 			}
@@ -99,6 +112,8 @@ public class AuthService {
 					.getBody();
 			return claims.getSubject();
 		} catch (Exception e) {
+			System.out.println("DEBUG: Token validation failed: " + e.getMessage());
+			e.printStackTrace();
 			return null; // Invalid token
 		}
 	}

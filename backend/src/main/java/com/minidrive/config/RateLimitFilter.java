@@ -25,7 +25,7 @@ public class RateLimitFilter implements Filter {
     
     // Rate limits
     private static final int LOGIN_LIMIT = 5;        // 5 attempts per minute
-    private static final int UPLOAD_LIMIT = 100;     // 100 chunks per minute
+    private static final int UPLOAD_LIMIT = 500;     // 500 chunks per minute (for large file uploads)
     private static final int DEFAULT_LIMIT = 200;    // 200 requests per minute
     
     private long lastCleanup = System.currentTimeMillis();

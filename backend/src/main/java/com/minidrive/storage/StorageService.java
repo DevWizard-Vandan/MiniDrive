@@ -42,18 +42,9 @@ public class StorageService {
     @Autowired
     private EncryptionService encryptionService;
 
-    public StorageService() {
-        // Connect to MinIO (use env var for Docker, fallback to localhost)
-        String endpoint = System.getenv("MINIO_ENDPOINT");
-        if (endpoint == null || endpoint.isEmpty()) {
-            endpoint = "http://localhost:9000";
-        }
-
-        this.minioClient = MinioClient.builder()
-                .endpoint(endpoint)
-                .credentials("minioadmin", "minioadmin")
-                .build();
-
+    @Autowired
+    public StorageService(MinioClient minioClient) {
+        this.minioClient = minioClient;
         initializeBucket();
         initializeVersionedBucket();
     }

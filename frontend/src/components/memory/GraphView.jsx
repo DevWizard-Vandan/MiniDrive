@@ -26,6 +26,7 @@ const GraphView = ({ onSelectFile }) => {
             setGraphData(response.data);
         } catch (error) {
             console.error('Failed to fetch graph:', error);
+            setGraphData({ nodes: [], edges: [] });
         } finally {
             setIsLoading(false);
         }
@@ -36,6 +37,17 @@ const GraphView = ({ onSelectFile }) => {
             fetchGraph();
         }
     }, [isOpen, threshold]);
+
+    // Close on Escape key
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape' && isOpen) {
+                setIsOpen(false);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen]);
 
     // Assign colors by file type
     const getNodeColor = (type) => {
@@ -252,10 +264,22 @@ const GraphView = ({ onSelectFile }) => {
                             <div className="flex-1 relative">
                                 {graphData.nodes.length === 0 ? (
                                     <div className="absolute inset-0 flex items-center justify-center text-white/40">
-                                        <div className="text-center">
+                                        <div className="text-center max-w-md px-6">
                                             <Network size={48} className="mx-auto mb-4 opacity-30" />
-                                            <p>No connected files found</p>
-                                            <p className="text-sm">Upload documents to build your knowledge graph</p>
+                                            <p className="text-lg font-medium mb-2">No connections found</p>
+                                            <p className="text-sm mb-4">
+                                                Upload PDF, TXT, DOCX, or MD files to build your knowledge graph.
+                                                Files are automatically analyzed for semantic connections.
+                                            </p>
+                                            <p className="text-xs text-white/30">
+                                                Try lowering the similarity threshold to see more connections.
+                                            </p>
+                                            <button
+                                                onClick={() => setIsOpen(false)}
+                                                className="mt-6 px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white/70 hover:text-white hover:bg-white/20 transition-all"
+                                            >
+                                                Close (Esc)
+                                            </button>
                                         </div>
                                     </div>
                                 ) : (

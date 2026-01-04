@@ -27,6 +27,12 @@ class ShareRepositoryTest {
     @Autowired
     private DataSource dataSource;
 
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private io.minio.MinioClient minioClient;
+
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
+
     private static final String TEST_USER = "shareuser";
     private static final String TEST_USER_ID = UUID.randomUUID().toString();
     private String testFileId;

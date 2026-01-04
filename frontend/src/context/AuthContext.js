@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import api from '../api';
 
 const AuthContext = createContext();
 
@@ -14,7 +15,20 @@ export const AuthProvider = ({ children }) => {
         if (storedUser) setUser(storedUser);
     }, []);
 
-    const login = (username, token) => {
+    const login = async (username, password) => {
+        const response = await api.post('/auth/login', { username, password });
+        const { token } = response.data;
+
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', username);
+        setUser(username);
+        navigate('/dashboard');
+    };
+
+    const register = async (username, password) => {
+        const response = await api.post('/auth/register', { username, password });
+        const { token } = response.data;
+
         localStorage.setItem('token', token);
         localStorage.setItem('user', username);
         setUser(username);
@@ -34,7 +48,7 @@ export const AuthProvider = ({ children }) => {
     const getAvatar = () => user ? user.charAt(0).toUpperCase() : 'U';
 
     return (
-        <AuthContext.Provider value={{ user, login, logout, getAvatar }}>
+        <AuthContext.Provider value={{ user, login, register, logout, getAvatar }}>
             {children}
         </AuthContext.Provider>
     );

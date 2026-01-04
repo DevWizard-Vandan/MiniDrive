@@ -21,7 +21,7 @@ services:
 
   # --- INFRASTRUCTURE ---
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15  # Includes pgvector extension for Sanchay Memory
     container_name: drive_db
     environment:
       POSTGRES_USER: admin

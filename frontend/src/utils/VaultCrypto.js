@@ -189,6 +189,52 @@ export const clearVaultPassword = () => {
     sessionStorage.removeItem('vaultPassword');
 };
 
+/**
+ * Check if vault password has ever been set (persists across sessions).
+ * This is separate from the actual password stored in sessionStorage.
+ */
+export const hasVaultPassword = () => {
+    return localStorage.getItem('vaultConfigured') === 'true';
+};
+
+/**
+ * Mark vault as configured (call when password is first created).
+ */
+export const markVaultConfigured = () => {
+    localStorage.setItem('vaultConfigured', 'true');
+};
+
+/**
+ * Generate a hash of the password for verification purposes.
+ * Uses SHA-256 with a fixed salt for deterministic hashing.
+ */
+const hashPassword = async (password) => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password + 'vault_verification_salt');
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return arrayBufferToBase64(hashBuffer);
+};
+
+/**
+ * Store a hash of the vault password for later verification.
+ * Call this when creating the vault password.
+ */
+export const storeVaultPasswordHash = async (password) => {
+    const hash = await hashPassword(password);
+    localStorage.setItem('vaultPasswordHash', hash);
+};
+
+/**
+ * Verify if a password matches the stored vault password hash.
+ * Returns true if password is correct, false otherwise.
+ */
+export const verifyVaultPassword = async (password) => {
+    const storedHash = localStorage.getItem('vaultPasswordHash');
+    if (!storedHash) return true; // No hash stored, allow (for backwards compatibility)
+    const inputHash = await hashPassword(password);
+    return storedHash === inputHash;
+};
+
 export default {
     generateSalt,
     deriveVaultKey,
@@ -200,5 +246,9 @@ export default {
     base64ToArrayBuffer,
     getVaultPassword,
     setVaultPassword,
-    clearVaultPassword
+    clearVaultPassword,
+    hasVaultPassword,
+    markVaultConfigured,
+    storeVaultPasswordHash,
+    verifyVaultPassword
 };

@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { motion } from 'framer-motion';
-import { HardDrive, Clock, Star, Trash2, UploadCloud, FolderPlus, Activity, Zap, Lock } from 'lucide-react';
+import { HardDrive, Clock, Star, Trash2, UploadCloud, FolderPlus, Activity, Zap, Lock, Unlock } from 'lucide-react';
 import { formatBytes } from '../../utils/helpers';
 
 const Sidebar = ({
@@ -10,7 +10,9 @@ const Sidebar = ({
     setBreadcrumbs,
     stats,
     onUpload,
-    onCreateFolder
+    onCreateFolder,
+    isVaultUnlocked = false,
+    onLockVault = null
 }) => {
     const navItems = [
         { id: 'drive', label: 'My Drive', icon: HardDrive },
@@ -114,6 +116,19 @@ const Sidebar = ({
                     <FolderPlus size={20} />
                     New Folder
                 </motion.button>
+
+                {/* Lock Vault Button - only show when vault is unlocked */}
+                {isVaultUnlocked && onLockVault && (
+                    <motion.button
+                        whileHover={{ scale: 1.02, backgroundColor: 'rgba(239, 68, 68, 0.2)' }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={onLockVault}
+                        className="w-full bg-red-500/10 border border-red-500/30 text-red-400 hover:text-red-300 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all"
+                    >
+                        <Lock size={20} />
+                        Lock Vault
+                    </motion.button>
+                )}
             </div>
 
             {/* Navigation */}
@@ -135,8 +150,17 @@ const Sidebar = ({
                                 }
                             }}
                         >
-                            <item.icon size={18} />
+                            {/* Show unlock icon for vault when unlocked */}
+                            {item.id === 'vault' && isVaultUnlocked ? (
+                                <Unlock size={18} className="text-green-400" />
+                            ) : (
+                                <item.icon size={18} />
+                            )}
                             {item.label}
+                            {/* Vault unlock indicator */}
+                            {item.id === 'vault' && isVaultUnlocked && (
+                                <span className="ml-1 text-[10px] text-green-400 font-medium">OPEN</span>
+                            )}
                             {currentView === item.id && (
                                 <motion.div
                                     layoutId="activeIndicator"

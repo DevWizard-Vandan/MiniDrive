@@ -14,10 +14,18 @@ const PreviewModal = ({ file, onClose, onDownload }) => {
     const videoRef = useRef(null);
     const controlsTimer = useRef(null);
 
+    // Auto-hide controls for video - cleanup effect
+    useEffect(() => {
+        return () => clearTimeout(controlsTimer.current);
+    }, []);
+
+    // Early return after hooks
     if (!file) return null;
 
     const token = localStorage.getItem('token');
-    const fileUrl = `http://localhost:8080/api/drive/view/${file.name}?token=${token}`;
+    // Use file_id with fallback to id for compatibility
+    const fileId = file.file_id || file.id;
+    const fileUrl = `http://localhost:8080/api/drive/view/${fileId}?token=${token}`;
     const ext = file.name.split('.').pop().toLowerCase();
 
     const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
@@ -32,10 +40,6 @@ const PreviewModal = ({ file, onClose, onDownload }) => {
             controlsTimer.current = setTimeout(() => setShowControls(false), 3000);
         }
     };
-
-    useEffect(() => {
-        return () => clearTimeout(controlsTimer.current);
-    }, []);
 
     const togglePlay = () => {
         if (videoRef.current) {

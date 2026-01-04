@@ -23,18 +23,18 @@ public class VectorRepository {
     /**
      * Save a file chunk with its embedding
      */
-    public void saveChunkEmbedding(UUID fileId, int userId, int chunkIndex, String content, float[] embedding) {
+    public void saveChunkEmbedding(UUID fileId, String ownerId, int chunkIndex, String content, float[] embedding) {
         String vectorStr = arrayToVectorString(embedding);
         
         String sql = """
             INSERT INTO file_embeddings (file_id, user_id, chunk_index, chunk_content, embedding)
-            VALUES (?::uuid, ?, ?, ?, ?::vector)
+            VALUES (?::uuid, ?::uuid, ?, ?, ?::vector)
             ON CONFLICT (file_id, chunk_index) DO UPDATE SET
                 chunk_content = EXCLUDED.chunk_content,
                 embedding = EXCLUDED.embedding
         """;
         
-        jdbcTemplate.update(sql, fileId.toString(), userId, chunkIndex, content, vectorStr);
+        jdbcTemplate.update(sql, fileId.toString(), ownerId, chunkIndex, content, vectorStr);
     }
 
     /**
@@ -47,15 +47,15 @@ public class VectorRepository {
     /**
      * Search for similar chunks across user's files
      */
-    public List<SimilarChunk> searchSimilar(int userId, float[] queryEmbedding, int limit) {
+    public List<SimilarChunk> searchSimilar(String userId, float[] queryEmbedding, int limit) {
         String vectorStr = arrayToVectorString(queryEmbedding);
         
         String sql = """
-            SELECT fe.file_id, fe.chunk_index, fe.chunk_content, f.name as filename,
+            SELECT fe.file_id, fe.chunk_index, fe.chunk_content, f.filename as filename,
                    1 - (fe.embedding <=> ?::vector) AS similarity
             FROM file_embeddings fe
             JOIN files f ON f.file_id = fe.file_id
-            WHERE fe.user_id = ?
+            WHERE fe.user_id = ?::uuid
             ORDER BY fe.embedding <=> ?::vector
             LIMIT ?
         """;
@@ -72,13 +72,13 @@ public class VectorRepository {
     /**
      * Get file similarity matrix for graph visualization
      */
-    public List<FileSimilarity> getFileSimilarities(int userId, float threshold) {
+    public List<FileSimilarity> getFileSimilarities(String userId, float threshold) {
         // Get average embeddings per file
         String sql = """
             WITH file_avg AS (
                 SELECT file_id, AVG(embedding) as avg_embedding
                 FROM file_embeddings
-                WHERE user_id = ?
+                WHERE user_id = ?::uuid
                 GROUP BY file_id
             )
             SELECT 

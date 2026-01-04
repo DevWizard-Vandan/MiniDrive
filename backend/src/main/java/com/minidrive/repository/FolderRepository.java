@@ -84,19 +84,28 @@ public class FolderRepository extends BaseRepository {
 
 		List<Map<String, Object>> folders = new ArrayList<>();
 		StringBuilder sql = new StringBuilder(
-				"SELECT id, name, created_at, is_starred, is_trashed FROM folders WHERE owner_id = ?::uuid"
+				"SELECT id, name, created_at, is_starred, is_trashed, is_vault FROM folders WHERE owner_id = ?::uuid"
 		);
 		List<Object> params = new ArrayList<>();
 		params.add(userId);
 
 		if ("trash".equals(filter)) {
 			sql.append(" AND is_trashed = TRUE");
+		} else if ("vault".equals(filter)) {
+			sql.append(" AND is_vault = TRUE AND is_trashed = FALSE");
+			// Support navigating into folders within vault
+			if (folderId != null && !folderId.isEmpty() && !folderId.equalsIgnoreCase("root")) {
+				sql.append(" AND parent_id = ?::uuid");
+				params.add(folderId);
+			} else {
+				sql.append(" AND parent_id IS NULL");
+			}
 		} else if ("starred".equals(filter)) {
-			sql.append(" AND is_starred = TRUE AND is_trashed = FALSE");
+			sql.append(" AND is_starred = TRUE AND is_trashed = FALSE AND is_vault = FALSE");
 		} else if ("recent".equals(filter)) {
-			sql.append(" AND is_trashed = FALSE AND created_at > NOW() - INTERVAL '7 days'");
+			sql.append(" AND is_trashed = FALSE AND is_vault = FALSE AND created_at > NOW() - INTERVAL '7 days'");
 		} else {
-			sql.append(" AND is_trashed = FALSE");
+			sql.append(" AND is_trashed = FALSE AND is_vault = FALSE");
 			if (folderId != null && !folderId.isEmpty() && !folderId.equalsIgnoreCase("root")) {
 				sql.append(" AND parent_id = ?::uuid");
 				params.add(folderId);
@@ -120,6 +129,7 @@ public class FolderRepository extends BaseRepository {
 				folder.put("type", "folder");
 				folder.put("starred", rs.getBoolean("is_starred"));
 				folder.put("trashed", rs.getBoolean("is_trashed"));
+				folder.put("vault", rs.getBoolean("is_vault"));
 				folder.put("date", rs.getTimestamp("created_at").toString());
 				folders.add(folder);
 			}
@@ -133,19 +143,28 @@ public class FolderRepository extends BaseRepository {
 
 		List<Map<String, Object>> files = new ArrayList<>();
 		StringBuilder sql = new StringBuilder(
-				"SELECT file_id, filename, size, uploaded_at, is_starred, is_trashed, folder_id FROM files WHERE owner_id = ?::uuid"
+				"SELECT file_id, filename, size, uploaded_at, is_starred, is_trashed, is_vault, folder_id FROM files WHERE owner_id = ?::uuid"
 		);
 		List<Object> params = new ArrayList<>();
 		params.add(userId);
 
 		if ("trash".equals(filter)) {
 			sql.append(" AND is_trashed = TRUE");
+		} else if ("vault".equals(filter)) {
+			sql.append(" AND is_vault = TRUE AND is_trashed = FALSE");
+			// Support navigating into folders within vault
+			if (folderId != null && !folderId.isEmpty() && !folderId.equalsIgnoreCase("root")) {
+				sql.append(" AND folder_id = ?::uuid");
+				params.add(folderId);
+			} else {
+				sql.append(" AND folder_id IS NULL");
+			}
 		} else if ("starred".equals(filter)) {
-			sql.append(" AND is_starred = TRUE AND is_trashed = FALSE");
+			sql.append(" AND is_starred = TRUE AND is_trashed = FALSE AND is_vault = FALSE");
 		} else if ("recent".equals(filter)) {
-			sql.append(" AND is_trashed = FALSE AND uploaded_at > NOW() - INTERVAL '7 days'");
+			sql.append(" AND is_trashed = FALSE AND is_vault = FALSE AND uploaded_at > NOW() - INTERVAL '7 days'");
 		} else {
-			sql.append(" AND is_trashed = FALSE");
+			sql.append(" AND is_trashed = FALSE AND is_vault = FALSE");
 			if (folderId != null && !folderId.isEmpty() && !folderId.equalsIgnoreCase("root")) {
 				sql.append(" AND folder_id = ?::uuid");
 				params.add(folderId);
@@ -170,6 +189,7 @@ public class FolderRepository extends BaseRepository {
 				file.put("type", "file");
 				file.put("starred", rs.getBoolean("is_starred"));
 				file.put("trashed", rs.getBoolean("is_trashed"));
+				file.put("vault", rs.getBoolean("is_vault"));
 				file.put("date", rs.getTimestamp("uploaded_at").toString());
 				file.put("folderId", rs.getString("folder_id"));
 				files.add(file);

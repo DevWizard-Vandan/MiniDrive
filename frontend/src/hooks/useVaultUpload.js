@@ -14,7 +14,7 @@ import {
  * Files are encrypted in the browser using AES-256-GCM before upload.
  * The server never sees the plaintext or encryption key.
  */
-export const useVaultUpload = () => {
+export const useVaultUpload = (onComplete = null) => {
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
     const [passwordPromptOpen, setPasswordPromptOpen] = useState(false);
@@ -83,8 +83,29 @@ export const useVaultUpload = () => {
                     setProgress(Math.round(50 + ((j + 1) / totalChunks) * 25 + (i / files.length) * 25));
                 }
 
-                await api.post(`/drive/complete?uploadId=${uploadId}`);
+                // Complete upload and get file ID
+                const completeRes = await api.post(`/drive/complete?uploadId=${uploadId}`);
+                const fileId = completeRes.data?.fileId || completeRes.data;
+
+                // Mark the file as vault file in backend
+                if (fileId) {
+                    try {
+                        await api.post('/drive/action/vault', {
+                            id: fileId,
+                            type: 'file',
+                            value: true
+                        });
+                    } catch (vaultErr) {
+                        console.warn('Could not mark file as vault:', vaultErr);
+                    }
+                }
+
                 toast.success(`Vault: Encrypted & uploaded ${file.name}`, { icon: '🔐' });
+            }
+
+            // Refresh content after upload
+            if (onComplete) {
+                onComplete();
             }
         } catch (error) {
             console.error('Vault upload error:', error);
@@ -93,7 +114,7 @@ export const useVaultUpload = () => {
             setUploading(false);
             setProgress(0);
         }
-    }, []);
+    }, [onComplete]);
 
     /**
      * Continue upload after password is provided.

@@ -11,11 +11,14 @@ import ShareModal from './components/modals/ShareModal';
 import SettingsModal from './components/modals/SettingsModal';
 import ProfileModal from './components/modals/ProfileModal';
 import PreviewModal from './components/modals/PreviewModal';
+import VaultPasswordModal from './components/modals/VaultPasswordModal';
 import ChatWithDrive from './components/memory/ChatWithDrive';
 import GraphView from './components/memory/GraphView';
+import useVaultUpload from './hooks/useVaultUpload';
+import { getVaultPassword, hasVaultPassword } from './utils/VaultCrypto';
 import toast from 'react-hot-toast';
 import api from './api';
-import { Home, ChevronRight, LayoutGrid, List, Upload } from 'lucide-react';
+import { Home, ChevronRight, LayoutGrid, List, Upload, Lock, UploadCloud } from 'lucide-react';
 
 const pageVariants = {
   initial: { opacity: 0 },
@@ -39,7 +42,8 @@ const Dashboard = () => {
     handleCreateFolder,
     deleteItem,
     restoreItem,
-    toggleStar
+    toggleStar,
+    toggleVault
   } = useDriveContent();
 
   const [menu, setMenu] = useState(null);
@@ -52,7 +56,16 @@ const Dashboard = () => {
   const [shareModalItem, setShareModalItem] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [previewFile, setPreviewFile] = useState(null); // NEW: Preview state
+  const [previewFile, setPreviewFile] = useState(null);
+
+  // Vault States
+  const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
+  const [isVaultUnlocked, setIsVaultUnlocked] = useState(() => !!getVaultPassword());
+  const [vaultPasswordMode, setVaultPasswordMode] = useState('unlock');
+  const vaultFileInputRef = useRef(null);
+
+  // Vault Upload Hook - pass fetchContent to refresh after vault upload
+  const { uploadToVault, uploading: vaultUploading, progress: vaultProgress } = useVaultUpload(fetchContent);
 
   // Keyboard Shortcuts
   useKeyboardShortcuts(createDriveShortcuts({
@@ -61,7 +74,7 @@ const Dashboard = () => {
     onDownload: () => { /* TODO */ },
     onNewFolder: () => {
       const name = prompt("Enter folder name:");
-      if (name) handleCreateFolder(name);
+      if (name) handleCreateFolder(name, currentView === 'vault');
     },
     onSearch: () => document.querySelector('input[type="text"]')?.focus(),
     onEscape: () => {
@@ -73,6 +86,18 @@ const Dashboard = () => {
     },
     onSelectAll: () => { /* TODO */ }
   }));
+
+  // --- VAULT LOCK HANDLER ---
+  const handleLockVault = () => {
+    sessionStorage.removeItem('vaultPassword');
+    setIsVaultUnlocked(false);
+    if (currentView === 'vault') {
+      setCurrentView('drive');
+      setCurrentFolder(null);
+      setBreadcrumbs([{ id: null, name: 'My Drive' }]);
+    }
+    toast.success('Vault locked', { icon: '🔒' });
+  };
 
   // --- FILE UPLOAD HANDLERS ---
   const handleFileSelect = () => {
@@ -140,6 +165,24 @@ const Dashboard = () => {
     }
   };
 
+  // --- MOVE HANDLER ---
+  const handleMove = async (draggedId, draggedType, targetFolderId) => {
+    // Prevent moving into itself (though backend should handle it, good UX to check)
+    if (draggedId === targetFolderId) return;
+
+    try {
+      await api.post('/drive/action/move', {
+        id: draggedId,
+        type: draggedType,
+        targetId: targetFolderId
+      });
+      toast.success("Moved item");
+      fetchContent();
+    } catch (e) {
+      toast.error("Failed to move item");
+    }
+  };
+
   // --- ACTIONS HANDLER ---
   const handleAction = async (action, item) => {
     switch (action) {
@@ -175,6 +218,10 @@ const Dashboard = () => {
         await toggleStar(item);
         break;
 
+      case 'vault':
+        await toggleVault(item);
+        break;
+
       case 'share':
         setShareModalItem(item);
         break;
@@ -196,9 +243,10 @@ const Dashboard = () => {
   // --- NAVIGATION + PREVIEW ---
   const handleItemDoubleClick = (item, type) => {
     if (type === 'folder') {
-      // Navigate into folder
-      setCurrentFolder(item.id);
-      setBreadcrumbs([...breadcrumbs, { id: item.id, name: item.name }]);
+      // Navigate into folder - use folder_id fallback for vault folders
+      const folderId = item.folder_id || item.id;
+      setCurrentFolder(folderId);
+      setBreadcrumbs([...breadcrumbs, { id: folderId, name: item.name }]);
     } else {
       // Open file preview
       setPreviewFile({ ...item, type: 'file' });
@@ -230,14 +278,37 @@ const Dashboard = () => {
         multiple
       />
 
+      {/* Hidden Vault File Input */}
+      <input
+        type="file"
+        ref={vaultFileInputRef}
+        onChange={(e) => {
+          if (e.target.files?.length > 0) {
+            uploadToVault(e.target.files, currentFolder);
+            e.target.value = '';
+          }
+        }}
+        className="hidden"
+        multiple
+      />
+
       {/* 1. Sidebar */}
       <Sidebar
         currentView={currentView}
         setCurrentView={(view) => {
+          if (view === 'vault' && !isVaultUnlocked) {
+            // Check if user has ever set a vault password
+            setVaultPasswordMode(hasVaultPassword() ? 'unlock' : 'create');
+            setIsVaultPasswordModalOpen(true);
+            return;
+          }
           setCurrentView(view);
           if (view === 'drive') {
             setCurrentFolder(null);
             setBreadcrumbs([{ id: null, name: 'My Drive' }]);
+          } else if (view === 'vault') {
+            setCurrentFolder(null);
+            setBreadcrumbs([{ id: null, name: 'Vault' }]);
           }
         }}
         stats={stats}
@@ -247,8 +318,10 @@ const Dashboard = () => {
         onUpload={handleFileSelect}
         onCreateFolder={() => {
           const name = prompt("Enter folder name:");
-          if (name) handleCreateFolder(name);
+          if (name) handleCreateFolder(name, currentView === 'vault');
         }}
+        isVaultUnlocked={isVaultUnlocked}
+        onLockVault={handleLockVault}
       />
 
       {/* 2. Main Content Area */}
@@ -273,6 +346,9 @@ const Dashboard = () => {
 
               {/* Breadcrumbs */}
               <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                {currentView === 'vault' && (
+                  <Lock size={14} className="text-purple-500" />
+                )}
                 {breadcrumbs.map((crumb, i) => (
                   <div key={crumb.id || 'root'} className="flex items-center gap-1">
                     {i > 0 && <ChevronRight size={14} className="text-slate-300 dark:text-slate-600" />}
@@ -280,7 +356,7 @@ const Dashboard = () => {
                       onClick={() => handleNavigate(crumb.id, i)}
                       className={`hover:bg-slate-100 dark:hover:bg-slate-800 px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 ${i === breadcrumbs.length - 1 ? 'text-indigo-600 dark:text-indigo-400 font-semibold bg-indigo-50 dark:bg-indigo-900/30' : 'hover:text-slate-900 dark:hover:text-white'}`}
                     >
-                      {i === 0 && <Home size={14} />}
+                      {i === 0 && currentView !== 'vault' && <Home size={14} />}
                       {crumb.name}
                     </button>
                   </div>
@@ -289,6 +365,19 @@ const Dashboard = () => {
 
               {/* View Controls */}
               <div className="flex items-center gap-2">
+                {/* Vault Upload Button */}
+                {currentView === 'vault' && isVaultUnlocked && (
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => vaultFileInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-medium shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30 transition-all"
+                  >
+                    <UploadCloud size={16} />
+                    Upload to Vault
+                  </motion.button>
+                )}
+
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value)}
@@ -380,6 +469,7 @@ const Dashboard = () => {
                   const y = Math.min(e.clientY, window.innerHeight - 300);
                   setMenu({ x, y, item, type: type || item.type });
                 }}
+                onMove={handleMove}
               />
             </div>
           </>
@@ -422,6 +512,20 @@ const Dashboard = () => {
           onDownload={handleDownload}
         />
       )}
+
+      {/* Vault Password Modal */}
+      <VaultPasswordModal
+        isOpen={isVaultPasswordModalOpen}
+        onClose={() => setIsVaultPasswordModalOpen(false)}
+        onUnlock={(password) => {
+          setIsVaultUnlocked(true);
+          setCurrentView('vault');
+          setCurrentFolder(null);
+          setBreadcrumbs([{ id: null, name: 'Vault' }]);
+          toast.success('Vault unlocked', { icon: '🔓' });
+        }}
+        mode={vaultPasswordMode}
+      />
 
       {/* Sanchay Memory - Chat with Drive */}
       <ChatWithDrive />

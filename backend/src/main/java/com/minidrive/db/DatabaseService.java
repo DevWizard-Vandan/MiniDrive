@@ -758,27 +758,141 @@ public class DatabaseService {
 
 		String sql = "UPDATE " + table + " SET is_starred = ? WHERE " + idCol + " = ?::uuid AND owner_id = ?::uuid";
 
-		try (Connection conn = dataSource.getConnection()) {
+		try (Connection conn = dataSource.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(sql)) {
+
 			String userId = requireUserId(conn, username);
 
-			try (PreparedStatement ps = conn.prepareStatement(sql)) {
-				ps.setBoolean(1, star);
-				ps.setString(2, id);
-				ps.setString(3, userId);
+			ps.setBoolean(1, star);
+			ps.setString(2, id);
+			ps.setString(3, userId);
 
-				int rows = ps.executeUpdate();
+			int rows = ps.executeUpdate();
 
-				if (rows > 0) {
-					log.info("✅ {} {} (ID: {})", star ? "Starred" : "Unstarred", isFolder ? "folder" : "file", id);
-					return DbResult.success(rows);
-				} else {
-					return DbResult.failure("Item not found or not owned by user");
-				}
+			if (rows > 0) {
+				String action = star ? "Starred" : "Unstarred";
+				log.info("✅ {} {} (ID: {})", action, isFolder ? "folder" : "file", id);
+				return DbResult.success(action, rows);
+			} else {
+				return DbResult.failure("Item not found or access denied");
 			}
 
 		} catch (SQLException e) {
-			log.error("❌ Toggle star failed: {}", e.getMessage());
-			return DbResult.failure(e.getMessage());
+			log.error("Toggle star failed: {}", e.getMessage());
+			return DbResult.failure("Database error: " + e.getMessage());
+		}
+	}
+
+	public DbResult toggleVault(String id, boolean isFolder, boolean vault, String username) {
+		if (!isFolder) {
+			// For files, just update the single file
+			return toggleVaultSingleItem(id, false, vault, username);
+		}
+
+		// For folders, use recursive update to include all children
+		try (Connection conn = dataSource.getConnection()) {
+			conn.setAutoCommit(false);
+
+			try {
+				String userId = requireUserId(conn, username);
+
+				// Update the folder itself
+				String sqlFolder = "UPDATE folders SET is_vault = ? WHERE id = ?::uuid AND owner_id = ?::uuid";
+				try (PreparedStatement ps = conn.prepareStatement(sqlFolder)) {
+					ps.setBoolean(1, vault);
+					ps.setString(2, id);
+					ps.setString(3, userId);
+					int rows = ps.executeUpdate();
+					if (rows == 0) {
+						conn.rollback();
+						return DbResult.failure("Folder not found or not owned by user");
+					}
+				}
+
+				// Update all files in this folder and subfolders (recursive via CTE)
+				String sqlFiles = """
+                    WITH RECURSIVE folder_tree AS (
+                        SELECT id FROM folders WHERE id = ?::uuid AND owner_id = ?::uuid
+                        UNION ALL
+                        SELECT f.id FROM folders f 
+                        JOIN folder_tree ft ON f.parent_id = ft.id
+                    )
+                    UPDATE files SET is_vault = ? 
+                    WHERE folder_id IN (SELECT id FROM folder_tree) AND owner_id = ?::uuid
+                """;
+				try (PreparedStatement ps = conn.prepareStatement(sqlFiles)) {
+					ps.setString(1, id);
+					ps.setString(2, userId);
+					ps.setBoolean(3, vault);
+					ps.setString(4, userId);
+					ps.executeUpdate();
+				}
+
+				// Update all subfolders (recursive)
+				String sqlSubFolders = """
+                    WITH RECURSIVE folder_tree AS (
+                        SELECT id FROM folders WHERE id = ?::uuid AND owner_id = ?::uuid
+                        UNION ALL
+                        SELECT f.id FROM folders f 
+                        JOIN folder_tree ft ON f.parent_id = ft.id
+                    )
+                    UPDATE folders SET is_vault = ? 
+                    WHERE id IN (SELECT id FROM folder_tree) AND owner_id = ?::uuid
+                """;
+				try (PreparedStatement ps = conn.prepareStatement(sqlSubFolders)) {
+					ps.setString(1, id);
+					ps.setString(2, userId);
+					ps.setBoolean(3, vault);
+					ps.setString(4, userId);
+					ps.executeUpdate();
+				}
+
+				conn.commit();
+				String action = vault ? "Moved to Vault" : "Removed from Vault";
+				log.info("✅ {} folder and all contents (ID: {})", action, id);
+				return DbResult.success(action + " (including all contents)", 1);
+
+			} catch (SQLException e) {
+				conn.rollback();
+				throw e;
+			} finally {
+				conn.setAutoCommit(true);
+			}
+
+		} catch (SQLException e) {
+			log.error("❌ Toggle vault failed: {}", e.getMessage());
+			return DbResult.failure("Database error: " + e.getMessage());
+		}
+	}
+
+	private DbResult toggleVaultSingleItem(String id, boolean isFolder, boolean vault, String username) {
+		String table = isFolder ? "folders" : "files";
+		String idCol = isFolder ? "id" : "file_id";
+
+		String sql = "UPDATE " + table + " SET is_vault = ? WHERE " + idCol + " = ?::uuid AND owner_id = ?::uuid";
+
+		try (Connection conn = dataSource.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(sql)) {
+
+			String userId = requireUserId(conn, username);
+
+			ps.setBoolean(1, vault);
+			ps.setString(2, id);
+			ps.setString(3, userId);
+
+			int rows = ps.executeUpdate();
+
+			if (rows > 0) {
+				String action = vault ? "Moved to Vault" : "Removed from Vault";
+				log.info("✅ {} {} (ID: {})", action, isFolder ? "folder" : "file", id);
+				return DbResult.success(action, rows);
+			} else {
+				return DbResult.failure("Item not found or access denied");
+			}
+
+		} catch (SQLException e) {
+			log.error("Toggle vault failed: {}", e.getMessage());
+			return DbResult.failure("Database error: " + e.getMessage());
 		}
 	}
 
@@ -1252,6 +1366,75 @@ public class DatabaseService {
 			log.error("❌ Rename failed: {}", e.getMessage());
 			return DbResult.failure(e.getMessage());
 		}
+	}
+
+	// ==================== MEMORY FEATURE SUPPORT ====================
+
+	/**
+	 * Get all files for a user (for graph visualization in Sanchay Memory)
+	 */
+	public List<Map<String, Object>> getAllFiles(String username) {
+		List<Map<String, Object>> files = new ArrayList<>();
+		String sql = """
+			SELECT f.file_id, f.filename as name, f.size, f.uploaded_at
+			FROM files f
+			JOIN users u ON f.owner_id = u.id
+			WHERE u.username = ? AND f.is_trashed = FALSE
+			ORDER BY f.uploaded_at DESC
+		""";
+
+		try (Connection conn = dataSource.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(sql)) {
+
+			ps.setString(1, username);
+			ResultSet rs = ps.executeQuery();
+
+			while (rs.next()) {
+				Map<String, Object> file = new HashMap<>();
+				file.put("file_id", rs.getString("file_id"));
+				file.put("name", rs.getString("name"));
+				file.put("size", rs.getLong("size"));
+				file.put("uploaded_at", rs.getTimestamp("uploaded_at"));
+				files.add(file);
+			}
+		} catch (SQLException e) {
+			log.error("Failed to get all files: {}", e.getMessage());
+		}
+		return files;
+	}
+
+	/**
+	 * Get file by ID and verify ownership (for streaming controller)
+	 */
+	public Map<String, Object> getFileById(String fileId, String username) {
+		String sql = """
+			SELECT f.file_id, f.filename as name, f.size, f.folder_id,
+			       CONCAT(u.id, '/', f.filename) as minio_path
+			FROM files f
+			JOIN users u ON f.owner_id = u.id
+			WHERE f.file_id = ?::uuid AND u.username = ? AND f.is_trashed = FALSE
+		""";
+
+		try (Connection conn = dataSource.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(sql)) {
+
+			ps.setString(1, fileId);
+			ps.setString(2, username);
+			ResultSet rs = ps.executeQuery();
+
+			if (rs.next()) {
+				Map<String, Object> file = new HashMap<>();
+				file.put("file_id", rs.getString("file_id"));
+				file.put("name", rs.getString("name"));
+				file.put("size", rs.getLong("size"));
+				file.put("folder_id", rs.getString("folder_id"));
+				file.put("minio_path", rs.getString("minio_path"));
+				return file;
+			}
+		} catch (SQLException e) {
+			log.error("Failed to get file by ID: {}", e.getMessage());
+		}
+		return null;
 	}
 
 	// ==================== HEALTH CHECK ====================

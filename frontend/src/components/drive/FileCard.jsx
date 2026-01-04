@@ -8,6 +8,7 @@ const FileCard = ({ item, type, index = 0, onNavigate, onMove, isTrashView, onCo
     const cardRef = useRef(null);
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const [isHovered, setIsHovered] = useState(false);
+    const [isDragOver, setIsDragOver] = useState(false);
 
     // File type config
     let Icon = File;
@@ -62,11 +63,23 @@ const FileCard = ({ item, type, index = 0, onNavigate, onMove, isTrashView, onCo
     const handleDrop = (e) => {
         e.preventDefault();
         e.stopPropagation();
+        setIsDragOver(false);
         const draggedId = e.dataTransfer.getData("itemId");
         const draggedType = e.dataTransfer.getData("itemType");
         if (isFolder && draggedId !== item.id.toString() && onMove) {
             onMove(draggedId, draggedType, item.id);
         }
+    };
+
+    const handleDragOver = (e) => {
+        if (isFolder) {
+            e.preventDefault();
+            setIsDragOver(true);
+        }
+    };
+
+    const handleDragLeave = () => {
+        setIsDragOver(false);
     };
 
     // Calculate 3D transform
@@ -101,7 +114,8 @@ const FileCard = ({ item, type, index = 0, onNavigate, onMove, isTrashView, onCo
             onMouseLeave={() => { setIsHovered(false); setMousePos({ x: 0.5, y: 0.5 }); }}
             draggable={!isTrashView}
             onDragStart={handleDragStart}
-            onDragOver={(e) => isFolder && e.preventDefault()}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, item, type); }}
             onDoubleClick={() => !isTrashView && onNavigate?.(item, type)}
@@ -113,14 +127,18 @@ const FileCard = ({ item, type, index = 0, onNavigate, onMove, isTrashView, onCo
         >
             {/* Card container */}
             <div
-                className="relative p-4 rounded-2xl overflow-hidden transition-shadow duration-300"
+                className={`relative p-4 rounded-2xl overflow-hidden transition-all duration-300 ${isDragOver ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-[#0a0a0f]' : ''}`}
                 style={{
-                    background: `linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)`,
+                    background: isDragOver
+                        ? `linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(139,92,246,0.15) 100%)`
+                        : `linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)`,
                     backdropFilter: 'blur(12px)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    boxShadow: isHovered
-                        ? `0 25px 50px -12px rgba(0,0,0,0.5), 0 0 40px ${gradientFrom}30`
-                        : '0 4px 20px rgba(0,0,0,0.2)',
+                    border: isDragOver ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.08)',
+                    boxShadow: isDragOver
+                        ? `0 0 30px rgba(99,102,241,0.4), 0 25px 50px -12px rgba(0,0,0,0.5)`
+                        : isHovered
+                            ? `0 25px 50px -12px rgba(0,0,0,0.5), 0 0 40px ${gradientFrom}30`
+                            : '0 4px 20px rgba(0,0,0,0.2)',
                 }}
             >
                 {/* Light source overlay */}

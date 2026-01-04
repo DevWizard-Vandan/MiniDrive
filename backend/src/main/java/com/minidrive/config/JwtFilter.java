@@ -38,13 +38,19 @@ public class JwtFilter extends OncePerRequestFilter {
 
 		// 3. Validate Token
 		if (token != null) {
+			System.out.println("DEBUG: JwtFilter received token: " + token.substring(0, Math.min(10, token.length())) + "...");
 			String username = authService.validateTokenAndGetUsername(token);
 
 			if (username != null) {
+				System.out.println("DEBUG: JwtFilter authenticated user: " + username);
 				UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
 						username, null, Collections.emptyList());
 				SecurityContextHolder.getContext().setAuthentication(auth);
+			} else {
+				System.out.println("DEBUG: JwtFilter failed to validate token for user.");
 			}
+		} else {
+			// System.out.println("DEBUG: JwtFilter - No token found");
 		}
 
 		filterChain.doFilter(request, response);

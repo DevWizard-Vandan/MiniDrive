@@ -32,6 +32,10 @@ export const useDriveContent = () => {
                 params.query = searchQuery;
             } else if (currentView === 'drive') {
                 if (currentFolder) params.folderId = currentFolder;
+            } else if (currentView === 'vault') {
+                // Vault view - pass both filter and folderId for folder navigation
+                params.filter = 'vault';
+                if (currentFolder) params.folderId = currentFolder;
             } else {
                 params.filter = currentView;
             }
@@ -125,9 +129,24 @@ export const useDriveContent = () => {
         fetchStats();
     };
 
-    const handleCreateFolder = async (name) => {
+    const handleCreateFolder = async (name, isVault = false) => {
         try {
-            await api.post('/drive/folders', { name, parentId: currentFolder });
+            const res = await api.post('/drive/folders', { name, parentId: currentFolder });
+            const folderId = res.data?.id || res.data;
+
+            // If creating in vault, mark folder as vault
+            if (isVault && folderId) {
+                try {
+                    await api.post('/drive/action/vault', {
+                        id: folderId,
+                        type: 'folder',
+                        value: true
+                    });
+                } catch (vaultErr) {
+                    console.warn('Could not mark folder as vault:', vaultErr);
+                }
+            }
+
             fetchContent();
             return true;
         } catch (err) { toast.error("Failed to create folder"); return false; }
@@ -174,6 +193,18 @@ export const useDriveContent = () => {
         } catch (e) { toast.error("Failed to update star"); }
     };
 
+    const toggleVault = async (item) => {
+        try {
+            await api.post('/drive/action/vault', {
+                id: item.id,
+                type: item.type,
+                value: !item.vault
+            });
+            fetchContent();
+            toast.success(item.vault ? "Removed from Vault" : "Moved to Vault");
+        } catch (e) { toast.error("Failed to update vault"); }
+    };
+
     return {
         content, stats, progress,
         currentView, setCurrentView,
@@ -181,6 +212,6 @@ export const useDriveContent = () => {
         breadcrumbs, setBreadcrumbs,
 
         fetchContent, handleUpload, handleCreateFolder,
-        deleteItem, restoreItem, toggleStar
+        deleteItem, restoreItem, toggleStar, toggleVault
     };
 };
